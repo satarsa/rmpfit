@@ -1,0 +1,7 @@
+[package]
+name = "rmpfit"
+version = "0.1.0"
+authors = ["Vadim Dyadkin <dyadkin@3lp.cx>"]
+edition = "2018"
+
+[dependencies]
