@@ -97,10 +97,52 @@ impl ::std::default::Default for MPConfig {
     }
 }
 
-pub enum MPStatus {}
+/// MP Fit errors
+pub enum MPError {
+    /// General input parameter error
+    Input,
+    /// User function produced non-finite values
+    Nan,
+    /// No user data points were supplied
+    Empty,
+    /// No free parameters
+    NoFree,
+    /// Initial values inconsistent with constraints
+    InitBounds,
+    /// Initial constraints inconsistent
+    Bounds,
+    /// Not enough degrees of freedom
+    DoF,
+}
+
+/// Potential success status
+pub enum MPSuccess {
+    /// Convergence in chi-square value
+    Chi,
+    /// Convergence in parameter value
+    Par,
+    /// Convergence in both chi-square and parameter
+    Both,
+    /// Convergence in orthogonality
+    Dir,
+    /// Maximum number of iterations reached
+    MaxIter,
+    /// ftol is too small; no further improvement
+    Ftol,
+    /// xtol is too small; no further improvement
+    Xtol,
+    /// gtol is too small; no further improvement
+    Gtol,
+}
+
+// MP Fit Result
+pub enum MPResult {
+    Success(MPSuccess, MPStatus),
+    Error(MPError),
+}
 
 /// Definition of results structure, for when fit completes
-pub struct MPResult {
+pub struct MPStatus {
     /// Final chi^2
     pub best_norm: f64,
     /// Starting value of chi^2
@@ -109,8 +151,6 @@ pub struct MPResult {
     pub n_iter: usize,
     /// Number of function evaluations
     pub n_fev: usize,
-    /// Fitting status code
-    pub status: MPStatus,
     /// Total number of parameters
     pub n_par: usize,
     /// Number of free parameters
