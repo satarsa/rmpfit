@@ -167,10 +167,41 @@ pub struct MPStatus {
     pub covar: Vec<f64>,
 }
 
+pub trait MPFitter {
+    fn fit(&self, params: &[f64], deviates: &mut [f64], derivs: Option<&mut [f64]>);
+}
+
+pub fn mpfit<T: MPFitter>(f: T, init: &mut [f64], params: &[MPPar], config: &MPConfig) -> MPResult {
+    MPResult::Success(
+        MPSuccess::Both,
+        MPStatus {
+            best_norm: 0.0,
+            orig_norm: 0.0,
+            n_iter: 0,
+            n_fev: 0,
+            n_par: 0,
+            n_free: 0,
+            n_pegged: 0,
+            n_func: 0,
+            resid: vec![],
+            xerror: vec![],
+            covar: vec![],
+        },
+    )
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::MPFitter;
+
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn linear() {
+        struct Linear;
+
+        impl MPFitter for Linear {
+            fn fit(&self, params: &[f64], deviates: &mut [f64], derivs: Option<&mut [f64]>) {
+                unimplemented!()
+            }
+        }
     }
 }
