@@ -97,6 +97,36 @@ impl ::std::default::Default for MPConfig {
     }
 }
 
+pub enum MPStatus {}
+
+/// Definition of results structure, for when fit completes
+pub struct MPResult {
+    /// Final chi^2
+    pub best_norm: f64,
+    /// Starting value of chi^2
+    pub orig_norm: f64,
+    /// Number of iterations
+    pub n_iter: usize,
+    /// Number of function evaluations
+    pub n_fev: usize,
+    /// Fitting status code
+    pub status: MPStatus,
+    /// Total number of parameters
+    pub n_par: usize,
+    /// Number of free parameters
+    pub n_free: usize,
+    /// Number of pegged parameters
+    pub n_pegged: usize,
+    /// Number of residuals (= num. of data points)
+    pub n_func: usize,
+    /// Final residuals nfunc-vector
+    pub resid: Vec<f64>,
+    /// Final parameter uncertainties (1-sigma) npar-vector
+    pub xerror: Vec<f64>,
+    /// Final parameter covariance matrix npar x npar array
+    pub covar: Vec<f64>,
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
