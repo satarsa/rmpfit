@@ -1,6 +1,50 @@
 pub const MP_NO_ITER: isize = -1;
 pub const MP_MACHEP0: f64 = 2.2204460e-16;
 
+/// Definition of a parameter constraint structure
+pub struct MPPar {
+    pub fixed: bool,
+    pub limited_low: bool,
+    pub limited_up: bool,
+    pub limit_low: f64,
+    pub limit_up: f64,
+    /// Step size for finite difference
+    pub step: f64,
+    /// Relative step size for finite difference
+    pub rel_step: f64,
+    /// Sidedness of finite difference derivative
+    pub side: MPSide,
+}
+
+impl ::std::default::Default for MPPar {
+    fn default() -> Self {
+        MPPar {
+            fixed: false,
+            limited_low: false,
+            limited_up: false,
+            limit_low: 0.0,
+            limit_up: 0.0,
+            step: 0.0,
+            rel_step: 0.0,
+            side: MPSide::Auto,
+        }
+    }
+}
+
+/// Sidedness of finite difference derivative
+pub enum MPSide {
+    /// one-sided derivative computed automatically
+    Auto,
+    /// one-sided derivative (f(x+h) - f(x)  )/h
+    Right,
+    /// one-sided derivative (f(x)   - f(x-h))/h
+    Left,
+    /// two-sided derivative (f(x+h) - f(x-h))/(2*h)
+    Both,
+    /// user-computed analytical derivatives
+    User,
+}
+
 /// Definition of MPFIT configuration structure
 pub struct MPConfig {
     /// Relative chi-square convergence criterion  Default: 1e-10
