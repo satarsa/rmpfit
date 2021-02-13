@@ -1,4 +1,4 @@
-pub const MP_NO_ITER: isize = -1;
+pub const MP_NO_ITER: usize = 0;
 pub const MP_MACHEP0: f64 = 2.2204460e-16;
 
 /// Definition of a parameter constraint structure
@@ -63,7 +63,7 @@ pub struct MPConfig {
     /// then basic error checking is done, and parameter
     /// errors/covariances are estimated based on input
     /// parameter values, but no fitting iterations are done.
-    pub max_iter: isize,
+    pub max_iter: usize,
     /// Maximum number of function evaluations, or 0 for no limit
     /// Default: 0 (no limit)
     pub max_fev: usize,
@@ -168,10 +168,43 @@ pub struct MPStatus {
 }
 
 pub trait MPFitter {
-    fn fit(&self, params: &[f64], deviates: &mut [f64], derivs: Option<&mut [f64]>);
+    fn eval(&self, params: &[f64], deviates: &mut [f64], derivs: Option<&mut [f64]>);
+
+    fn n_params(&self) -> usize;
 }
 
-pub fn mpfit<T: MPFitter>(f: T, init: &mut [f64], params: &[MPPar], config: &MPConfig) -> MPResult {
+pub fn mpfit<T: MPFitter>(
+    f: T,
+    init: &mut [f64],
+    params: Option<&[MPPar]>,
+    config: &MPConfig,
+) -> MPResult {
+    if init.len() == 0 {
+        return MPResult::Error(MPError::Empty);
+    }
+    let mut nfree: usize = 0;
+    if let Some(ref pars) = params {
+        if pars.len() == 0 {
+            return MPResult::Error(MPError::Empty);
+        }
+        for p in *pars {
+            if !p.fixed {
+                nfree += 1;
+            }
+        }
+        if nfree == 0 {
+            return MPResult::Error(MPError::NoFree);
+        }
+    }
+    let m = f.n_params();
+    if m < nfree {
+        return MPResult::Error(MPError::DoF);
+    }
+    let ldfjac = m;
+    let mut fvec = vec![0.; m];
+    f.eval(init, &mut fvec, None);
+    let mut nfev: usize = 1;
+    let fnorm = mp_norm(m, &fvec);
     MPResult::Success(
         MPSuccess::Both,
         MPStatus {
@@ -190,6 +223,84 @@ pub fn mpfit<T: MPFitter>(f: T, init: &mut [f64], params: &[MPPar], config: &MPC
     )
 }
 
+///    function enorm
+///
+///    given an n-vector x, this function calculates the
+///    euclidean norm of x.
+///
+///    the euclidean norm is computed by accumulating the sum of
+///    squares in three different sums. the sums of squares for the
+///    small and large components are scaled so that no overflows
+///    occur. non-destructive underflows are permitted. underflows
+///    and overflows do not occur in the computation of the unscaled
+///    sum of squares for the intermediate components.
+///    the definitions of small, intermediate and large components
+///    depend on two constants, rdwarf and rgiant. the main
+///    restrictions on these constants are that rdwarf**2 not
+///    underflow and rgiant**2 not overflow. the constants
+///    given here are suitable for every known computer.
+///    the function statement is
+///    double precision function enorm(n,x)
+///    where
+///
+///    n is a positive integer input variable.
+///
+///    x is an input array of length n.
+///
+///    subprograms called
+///
+///    fortran-supplied ... dabs,dsqrt
+///
+///    argonne national laboratory. minpack project. march 1980.
+///    burton s. garbow, kenneth e. hillstrom, jorge j. more
+fn mp_norm(n: usize, x: &[f64]) -> f64 {
+    let mut s1 = 0.;
+    let mut s2 = 0.;
+    let mut s3 = 0.;
+    let mut x1max = 0.;
+    let mut x3max = 0.;
+    let agiant = (f64::MAX.sqrt() * 0.1) / n as f64;
+    let rdwarf = (f64::MIN_POSITIVE.sqrt() * 1.5) * 10.0;
+    for val in x {
+        let xabs = val.abs();
+        if xabs > rdwarf && xabs < agiant {
+            // sum for intermediate components.
+            s2 += xabs * xabs;
+        } else if xabs > rdwarf {
+            // sum for large components.
+            if xabs > x1max {
+                let temp = x1max / xabs;
+                s1 = 1.0 + s1 * temp * temp;
+                x1max = xabs;
+            } else {
+                let temp = xabs / x1max;
+                s1 += temp * temp;
+            }
+        } else if xabs > x3max {
+            // sum for small components.
+            let temp = x3max / xabs;
+            s3 = 1.0 + s3 * temp * temp;
+            x3max = xabs;
+        } else if xabs != 0.0 {
+            let temp = xabs / x3max;
+            s3 += temp * temp;
+        }
+    }
+    // calculation of norm.
+    if s1 != 0.0 {
+        x1max * (s1 + (s2 / x1max) / x1max).sqrt()
+    } else if s2 != 0.0 {
+        if s2 >= x3max {
+            s2 * (1.0 + (x3max / s2) * (x3max * s3))
+        } else {
+            x3max * ((s2 / x3max) + (x3max * s3))
+        }
+        .sqrt()
+    } else {
+        x3max * s3.sqrt()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::MPFitter;
@@ -199,8 +310,12 @@ mod tests {
         struct Linear;
 
         impl MPFitter for Linear {
-            fn fit(&self, params: &[f64], deviates: &mut [f64], derivs: Option<&mut [f64]>) {
+            fn eval(&self, params: &[f64], deviates: &mut [f64], derivs: Option<&mut [f64]>) {
                 unimplemented!()
+            }
+
+            fn n_params(&self) -> usize {
+                0
             }
         }
     }
