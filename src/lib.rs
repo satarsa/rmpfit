@@ -204,7 +204,7 @@ pub fn mpfit<T: MPFitter>(
     let mut fvec = vec![0.; m];
     f.eval(init, &mut fvec, None);
     let mut nfev: usize = 1;
-    let fnorm = mp_norm(m, &fvec);
+    let fnorm = mp_enorm(m, &fvec);
     let orig_norm = fnorm * fnorm;
     let mut xnew = vec![0.; init.len()];
     xnew.copy_from_slice(init);
@@ -256,7 +256,7 @@ pub fn mpfit<T: MPFitter>(
 ///
 ///    argonne national laboratory. minpack project. march 1980.
 ///    burton s. garbow, kenneth e. hillstrom, jorge j. more
-fn mp_norm(n: usize, x: &[f64]) -> f64 {
+fn mp_enorm(n: usize, x: &[f64]) -> f64 {
     let mut s1 = 0.;
     let mut s2 = 0.;
     let mut s3 = 0.;
