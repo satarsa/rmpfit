@@ -205,6 +205,9 @@ pub fn mpfit<T: MPFitter>(
     f.eval(init, &mut fvec, None);
     let mut nfev: usize = 1;
     let fnorm = mp_norm(m, &fvec);
+    let orig_norm = fnorm * fnorm;
+    let mut xnew = vec![0.; init.len()];
+    xnew.copy_from_slice(init);
     MPResult::Success(
         MPSuccess::Both,
         MPStatus {
@@ -303,20 +306,61 @@ fn mp_norm(n: usize, x: &[f64]) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use crate::MPFitter;
+    use crate::{mpfit, MPFitter};
 
     #[test]
     fn linear() {
-        struct Linear;
+        struct Linear {
+            x: Vec<f64>,
+            y: Vec<f64>,
+            ye: Vec<f64>,
+        };
 
         impl MPFitter for Linear {
             fn eval(&self, params: &[f64], deviates: &mut [f64], derivs: Option<&mut [f64]>) {
-                unimplemented!()
+                for (((d, x), y), ye) in deviates
+                    .iter_mut()
+                    .zip(self.x.iter())
+                    .zip(self.y.iter())
+                    .zip(self.ye.iter())
+                {
+                    let f = params[0] + params[1] * *x;
+                    *d = (*y - f) / *ye;
+                }
             }
 
             fn n_params(&self) -> usize {
-                0
+                2
             }
         }
+        let l = Linear {
+            x: vec![
+                -1.7237128E+00,
+                1.8712276E+00,
+                -9.6608055E-01,
+                -2.8394297E-01,
+                1.3416969E+00,
+                1.3757038E+00,
+                -1.3703436E+00,
+                4.2581975E-02,
+                -1.4970151E-01,
+                8.2065094E-01,
+            ],
+            y: vec![
+                1.9000429E-01,
+                6.5807428E+00,
+                1.4582725E+00,
+                2.7270851E+00,
+                5.5969253E+00,
+                5.6249280E+00,
+                0.787615,
+                3.2599759E+00,
+                2.9771762E+00,
+                4.5936475E+00,
+            ],
+            ye: vec![0.07; 10],
+        };
+        let mut init = [1., 1.];
+        let _ = mpfit(l, &mut init, None, &Default::default());
     }
 }
