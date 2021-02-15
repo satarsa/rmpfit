@@ -173,6 +173,11 @@ pub trait MPFitter {
     fn number_of_points(&self) -> usize;
 }
 
+/// (f64::MIN_POSITIVE * 1.5).sqrt() * 10
+const MP_RDWARF: f64 = 1.8269129289596699e-153;
+/// f64::MAX.sqrt() * 0.1
+const MP_RGIANT: f64 = 1.3407807799935083e+153;
+
 struct MPFit<'a> {
     m: usize,
     npar: usize,
@@ -203,6 +208,83 @@ impl<'a> MPFit<'a> {
                 xall: &xall,
                 qtf: vec![],
             })
+        }
+    }
+
+    ///    function enorm
+    ///
+    ///    given an n-vector x, this function calculates the
+    ///    euclidean norm of x.
+    ///
+    ///    the euclidean norm is computed by accumulating the sum of
+    ///    squares in three different sums. the sums of squares for the
+    ///    small and large components are scaled so that no overflows
+    ///    occur. non-destructive underflows are permitted. underflows
+    ///    and overflows do not occur in the computation of the unscaled
+    ///    sum of squares for the intermediate components.
+    ///    the definitions of small, intermediate and large components
+    ///    depend on two constants, rdwarf and rgiant. the main
+    ///    restrictions on these constants are that rdwarf**2 not
+    ///    underflow and rgiant**2 not overflow. the constants
+    ///    given here are suitable for every known computer.
+    ///    the function statement is
+    ///    double precision function enorm(n,x)
+    ///    where
+    ///
+    ///    n is a positive integer input variable.
+    ///
+    ///    x is an input array of length n.
+    ///
+    ///    subprograms called
+    ///
+    ///    fortran-supplied ... dabs,dsqrt
+    ///
+    ///    argonne national laboratory. minpack project. march 1980.
+    ///    burton s. garbow, kenneth e. hillstrom, jorge j. more
+    fn enorm(&self) -> f64 {
+        let mut s1 = 0.;
+        let mut s2 = 0.;
+        let mut s3 = 0.;
+        let mut x1max = 0.;
+        let mut x3max = 0.;
+        let agiant = MP_RGIANT / self.m as f64;
+        for val in &self.fvec {
+            let xabs = val.abs();
+            if xabs > MP_RDWARF && xabs < agiant {
+                // sum for intermediate components.
+                s2 += xabs * xabs;
+            } else if xabs > MP_RDWARF {
+                // sum for large components.
+                if xabs > x1max {
+                    let temp = x1max / xabs;
+                    s1 = 1.0 + s1 * temp * temp;
+                    x1max = xabs;
+                } else {
+                    let temp = xabs / x1max;
+                    s1 += temp * temp;
+                }
+            } else if xabs > x3max {
+                // sum for small components.
+                let temp = x3max / xabs;
+                s3 = 1.0 + s3 * temp * temp;
+                x3max = xabs;
+            } else if xabs != 0.0 {
+                let temp = xabs / x3max;
+                s3 += temp * temp;
+            }
+        }
+        // calculation of norm.
+        if s1 != 0.0 {
+            x1max * (s1 + (s2 / x1max) / x1max).sqrt()
+        } else if s2 != 0.0 {
+            if s2 >= x3max {
+                s2 * (1.0 + (x3max / s2) * (x3max * s3))
+            } else {
+                x3max * ((s2 / x3max) + (x3max * s3))
+            }
+            .sqrt()
+        } else {
+            x3max * s3.sqrt()
         }
     }
 }
@@ -241,7 +323,7 @@ pub fn mpfit<T: MPFitter>(
         return MPResult::Error(MPError::DoF);
     }
     f.eval(fit.xall, &mut fit.fvec, None);
-    let fnorm = mp_enorm(fit.m, &fit.fvec);
+    let fnorm = fit.enorm();
     let orig_norm = fnorm * fnorm;
     fit.xnew = vec![0.; fit.npar];
     fit.xnew.copy_from_slice(fit.xall);
@@ -277,88 +359,6 @@ pub fn mpfit<T: MPFitter>(
             covar: vec![],
         },
     )
-}
-
-/// (f64::MIN_POSITIVE * 1.5).sqrt() * 10
-const MP_RDWARF: f64 = 1.8269129289596699e-153;
-/// f64::MAX.sqrt() * 0.1
-const MP_RGIANT: f64 = 1.3407807799935083e+153;
-
-///    function enorm
-///
-///    given an n-vector x, this function calculates the
-///    euclidean norm of x.
-///
-///    the euclidean norm is computed by accumulating the sum of
-///    squares in three different sums. the sums of squares for the
-///    small and large components are scaled so that no overflows
-///    occur. non-destructive underflows are permitted. underflows
-///    and overflows do not occur in the computation of the unscaled
-///    sum of squares for the intermediate components.
-///    the definitions of small, intermediate and large components
-///    depend on two constants, rdwarf and rgiant. the main
-///    restrictions on these constants are that rdwarf**2 not
-///    underflow and rgiant**2 not overflow. the constants
-///    given here are suitable for every known computer.
-///    the function statement is
-///    double precision function enorm(n,x)
-///    where
-///
-///    n is a positive integer input variable.
-///
-///    x is an input array of length n.
-///
-///    subprograms called
-///
-///    fortran-supplied ... dabs,dsqrt
-///
-///    argonne national laboratory. minpack project. march 1980.
-///    burton s. garbow, kenneth e. hillstrom, jorge j. more
-fn mp_enorm(n: usize, x: &[f64]) -> f64 {
-    let mut s1 = 0.;
-    let mut s2 = 0.;
-    let mut s3 = 0.;
-    let mut x1max = 0.;
-    let mut x3max = 0.;
-    let agiant = MP_RGIANT / n as f64;
-    for val in x {
-        let xabs = val.abs();
-        if xabs > MP_RDWARF && xabs < agiant {
-            // sum for intermediate components.
-            s2 += xabs * xabs;
-        } else if xabs > MP_RDWARF {
-            // sum for large components.
-            if xabs > x1max {
-                let temp = x1max / xabs;
-                s1 = 1.0 + s1 * temp * temp;
-                x1max = xabs;
-            } else {
-                let temp = xabs / x1max;
-                s1 += temp * temp;
-            }
-        } else if xabs > x3max {
-            // sum for small components.
-            let temp = x3max / xabs;
-            s3 = 1.0 + s3 * temp * temp;
-            x3max = xabs;
-        } else if xabs != 0.0 {
-            let temp = xabs / x3max;
-            s3 += temp * temp;
-        }
-    }
-    // calculation of norm.
-    if s1 != 0.0 {
-        x1max * (s1 + (s2 / x1max) / x1max).sqrt()
-    } else if s2 != 0.0 {
-        if s2 >= x3max {
-            s2 * (1.0 + (x3max / s2) * (x3max * s3))
-        } else {
-            x3max * ((s2 / x3max) + (x3max * s3))
-        }
-        .sqrt()
-    } else {
-        x3max * s3.sqrt()
-    }
 }
 
 #[cfg(test)]
