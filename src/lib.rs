@@ -189,6 +189,7 @@ struct MPFit<'a> {
     x: Vec<f64>,
     xall: &'a [f64],
     qtf: Vec<f64>,
+    fjack: Vec<f64>,
 }
 
 impl<'a> MPFit<'a> {
@@ -207,6 +208,7 @@ impl<'a> MPFit<'a> {
                 x: vec![],
                 xall: &xall,
                 qtf: vec![],
+                fjack: vec![],
             })
         }
     }
@@ -335,6 +337,7 @@ pub fn mpfit<T: MPFitter>(
     let par = 0.0;
     let iter = 1;
     fit.qtf = vec![0.; fit.nfree];
+    fit.fjack = vec![0.; fit.m * fit.nfree];
     loop {
         for i in 0..fit.nfree {
             fit.xnew[fit.ifree[i]] = fit.x[i];
