@@ -170,7 +170,7 @@ pub struct MPStatus {
 pub trait MPFitter {
     fn eval(&self, params: &[f64], deviates: &mut [f64], derivs: Option<&mut [f64]>);
 
-    fn n_params(&self) -> usize;
+    fn number_of_points(&self) -> usize;
 }
 
 pub fn mpfit<T: MPFitter>(
@@ -196,7 +196,7 @@ pub fn mpfit<T: MPFitter>(
             return MPResult::Error(MPError::NoFree);
         }
     }
-    let m = f.n_params();
+    let m = f.number_of_points();
     if m < nfree {
         return MPResult::Error(MPError::DoF);
     }
@@ -225,6 +225,11 @@ pub fn mpfit<T: MPFitter>(
         },
     )
 }
+
+/// (f64::MIN_POSITIVE * 1.5).sqrt() * 10
+const MP_RDWARF: f64 = 1.8269129289596699e-153;
+/// f64::MAX.sqrt() * 0.1
+const MP_RGIANT: f64 = 1.3407807799935083e+153;
 
 ///    function enorm
 ///
@@ -262,14 +267,13 @@ fn mp_enorm(n: usize, x: &[f64]) -> f64 {
     let mut s3 = 0.;
     let mut x1max = 0.;
     let mut x3max = 0.;
-    let agiant = (f64::MAX.sqrt() * 0.1) / n as f64;
-    let rdwarf = (f64::MIN_POSITIVE.sqrt() * 1.5) * 10.0;
+    let agiant = MP_RGIANT / n as f64;
     for val in x {
         let xabs = val.abs();
-        if xabs > rdwarf && xabs < agiant {
+        if xabs > MP_RDWARF && xabs < agiant {
             // sum for intermediate components.
             s2 += xabs * xabs;
-        } else if xabs > rdwarf {
+        } else if xabs > MP_RDWARF {
             // sum for large components.
             if xabs > x1max {
                 let temp = x1max / xabs;
@@ -329,8 +333,8 @@ mod tests {
                 }
             }
 
-            fn n_params(&self) -> usize {
-                2
+            fn number_of_points(&self) -> usize {
+                self.x.len()
             }
         }
         let l = Linear {
