@@ -173,56 +173,94 @@ pub trait MPFitter {
     fn number_of_points(&self) -> usize;
 }
 
+struct MPFit<'a> {
+    m: usize,
+    npar: usize,
+    nfree: usize,
+    ifree: Vec<usize>,
+    fvec: Vec<f64>,
+    nfev: usize,
+    xnew: Vec<f64>,
+    x: Vec<f64>,
+    xall: &'a [f64],
+    qtf: Vec<f64>,
+}
+
+impl<'a> MPFit<'a> {
+    fn new(m: usize, xall: &[f64]) -> Option<MPFit> {
+        if m == 0 {
+            None
+        } else {
+            Some(MPFit {
+                m,
+                npar: xall.len(),
+                nfree: 0,
+                ifree: vec![],
+                fvec: vec![0.; m],
+                nfev: 1,
+                xnew: vec![],
+                x: vec![],
+                xall: &xall,
+                qtf: vec![],
+            })
+        }
+    }
+}
+
 pub fn mpfit<T: MPFitter>(
     f: T,
     xall: &mut [f64],
     params: Option<&[MPPar]>,
     config: &MPConfig,
 ) -> MPResult {
-    let npar = xall.len();
-    if npar == 0 {
-        return MPResult::Error(MPError::Empty);
-    }
-    let (nfree, ifree) = match &params {
-        None => (npar, (0..npar).collect()),
+    let mut fit = match MPFit::new(f.number_of_points(), xall) {
+        None => return MPResult::Error(MPError::Empty),
+        Some(v) => v,
+    };
+    match &params {
+        None => {
+            fit.nfree = fit.npar;
+            fit.ifree = (0..fit.npar).collect();
+        }
         Some(pars) => {
             if pars.len() == 0 {
                 return MPResult::Error(MPError::Empty);
             }
-            let mut ifree = vec![];
-            let mut nfree = 0;
             for (i, p) in pars.iter().enumerate() {
                 if !p.fixed {
-                    nfree += 1;
-                    ifree.push(i);
+                    fit.nfree += 1;
+                    fit.ifree.push(i);
                 }
             }
-            if nfree == 0 {
+            if fit.nfree == 0 {
                 return MPResult::Error(MPError::NoFree);
             }
-            (nfree, ifree)
         }
     };
-    let m = f.number_of_points();
-    if m < nfree {
+    if fit.m < fit.nfree {
         return MPResult::Error(MPError::DoF);
     }
-    let ldfjac = m;
-    let mut fvec = vec![0.; m];
-    f.eval(xall, &mut fvec, None);
-    let mut nfev: usize = 1;
-    let fnorm = mp_enorm(m, &fvec);
+    f.eval(fit.xall, &mut fit.fvec, None);
+    let fnorm = mp_enorm(fit.m, &fit.fvec);
     let orig_norm = fnorm * fnorm;
-    let mut xnew = vec![0.; npar];
-    xnew.copy_from_slice(xall);
-    let mut x = Vec::with_capacity(nfree);
-    for i in 0..nfree {
-        x.push(xall[ifree[i]]);
+    fit.xnew = vec![0.; fit.npar];
+    fit.xnew.copy_from_slice(fit.xall);
+    fit.x = Vec::with_capacity(fit.nfree);
+    for i in 0..fit.nfree {
+        fit.x.push(fit.xall[fit.ifree[i]]);
     }
     // Initialize Levenberg-Marquardt parameter and iteration counter
     let par = 0.0;
     let iter = 1;
-    let mut qtf = vec![0.; nfree];
+    fit.qtf = vec![0.; fit.nfree];
+    loop {
+        for i in 0..fit.nfree {
+            fit.xnew[fit.ifree[i]] = fit.x[i];
+        }
+        // Calculate the Jacobian matrix
+
+        break;
+    }
     MPResult::Success(
         MPSuccess::Both,
         MPStatus {
