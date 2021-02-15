@@ -179,23 +179,28 @@ pub fn mpfit<T: MPFitter>(
     params: Option<&[MPPar]>,
     config: &MPConfig,
 ) -> MPResult {
-    if init.len() == 0 {
+    let npar = init.len();
+    if npar == 0 {
         return MPResult::Error(MPError::Empty);
     }
-    let mut nfree: usize = 0;
-    if let Some(ref pars) = params {
-        if pars.len() == 0 {
-            return MPResult::Error(MPError::Empty);
-        }
-        for p in *pars {
-            if !p.fixed {
-                nfree += 1;
+    let nfree = match &params {
+        None => npar,
+        Some(pars) => {
+            if pars.len() == 0 {
+                return MPResult::Error(MPError::Empty);
             }
+            let mut nfree = 0;
+            for p in *pars {
+                if !p.fixed {
+                    nfree += 1;
+                }
+            }
+            if nfree == 0 {
+                return MPResult::Error(MPError::NoFree);
+            }
+            nfree
         }
-        if nfree == 0 {
-            return MPResult::Error(MPError::NoFree);
-        }
-    }
+    };
     let m = f.number_of_points();
     if m < nfree {
         return MPResult::Error(MPError::DoF);
@@ -206,8 +211,26 @@ pub fn mpfit<T: MPFitter>(
     let mut nfev: usize = 1;
     let fnorm = mp_enorm(m, &fvec);
     let orig_norm = fnorm * fnorm;
-    let mut xnew = vec![0.; init.len()];
+    let mut xnew = vec![0.; npar];
     xnew.copy_from_slice(init);
+    let mut x = match &params {
+        None => {
+            let mut x = vec![0.; npar];
+            x.copy_from_slice(init);
+            x
+        }
+        Some(pars) => {
+            let mut x = vec![];
+            let mut i = 0;
+            for (j, par) in pars.iter().enumerate() {
+                if !par.fixed {
+                    x[i] = init[j];
+                    i += 1;
+                }
+            }
+            x
+        }
+    };
     MPResult::Success(
         MPSuccess::Both,
         MPStatus {
