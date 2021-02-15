@@ -1,6 +1,3 @@
-pub const MP_NO_ITER: usize = 0;
-pub const MP_MACHEP0: f64 = 2.2204460e-16;
-
 /// Definition of a parameter constraint structure
 pub struct MPPar {
     pub fixed: bool,
@@ -53,13 +50,13 @@ pub struct MPConfig {
     pub xtol: f64,
     /// Orthogonality convergence criterion        Default: 1e-10
     pub gtol: f64,
-    /// Finite derivative step size                Default: MP_MACHEP0
+    /// Finite derivative step size                Default: f64::EPSILON
     pub epsfcn: f64,
     /// Initial step bound                         Default: 100.0
     pub step_factor: f64,
     /// Range tolerance for covariance calculation Default: 1e-14
     pub covtol: f64,
-    /// Maximum number of iterations.  If maxiter == MP_NO_ITER,
+    /// Maximum number of iterations.  If maxiter == 0,
     /// then basic error checking is done, and parameter
     /// errors/covariances are estimated based on input
     /// parameter values, but no fitting iterations are done.
@@ -85,10 +82,10 @@ impl ::std::default::Default for MPConfig {
             ftol: 1e-10,
             xtol: 1e-10,
             gtol: 1e-10,
-            epsfcn: MP_MACHEP0,
+            epsfcn: f64::EPSILON,
             step_factor: 100.0,
             covtol: 1e-14,
-            max_iter: MP_NO_ITER,
+            max_iter: 0,
             max_fev: 0,
             n_print: true,
             do_user_scale: false,
