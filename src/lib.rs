@@ -175,30 +175,32 @@ pub trait MPFitter {
 
 pub fn mpfit<T: MPFitter>(
     f: T,
-    init: &mut [f64],
+    xall: &mut [f64],
     params: Option<&[MPPar]>,
     config: &MPConfig,
 ) -> MPResult {
-    let npar = init.len();
+    let npar = xall.len();
     if npar == 0 {
         return MPResult::Error(MPError::Empty);
     }
-    let nfree = match &params {
-        None => npar,
+    let (nfree, ifree) = match &params {
+        None => (npar, (0..npar).collect()),
         Some(pars) => {
             if pars.len() == 0 {
                 return MPResult::Error(MPError::Empty);
             }
+            let mut ifree = vec![];
             let mut nfree = 0;
-            for p in *pars {
+            for (i, p) in pars.iter().enumerate() {
                 if !p.fixed {
                     nfree += 1;
+                    ifree.push(i);
                 }
             }
             if nfree == 0 {
                 return MPResult::Error(MPError::NoFree);
             }
-            nfree
+            (nfree, ifree)
         }
     };
     let m = f.number_of_points();
@@ -207,30 +209,20 @@ pub fn mpfit<T: MPFitter>(
     }
     let ldfjac = m;
     let mut fvec = vec![0.; m];
-    f.eval(init, &mut fvec, None);
+    f.eval(xall, &mut fvec, None);
     let mut nfev: usize = 1;
     let fnorm = mp_enorm(m, &fvec);
     let orig_norm = fnorm * fnorm;
     let mut xnew = vec![0.; npar];
-    xnew.copy_from_slice(init);
-    let mut x = match &params {
-        None => {
-            let mut x = vec![0.; npar];
-            x.copy_from_slice(init);
-            x
-        }
-        Some(pars) => {
-            let mut x = vec![];
-            let mut i = 0;
-            for (j, par) in pars.iter().enumerate() {
-                if !par.fixed {
-                    x[i] = init[j];
-                    i += 1;
-                }
-            }
-            x
-        }
-    };
+    xnew.copy_from_slice(xall);
+    let mut x = Vec::with_capacity(nfree);
+    for i in 0..nfree {
+        x.push(xall[ifree[i]]);
+    }
+    // Initialize Levenberg-Marquardt parameter and iteration counter
+    let par = 0.0;
+    let iter = 1;
+    let mut qtf = vec![0.; nfree];
     MPResult::Success(
         MPSuccess::Both,
         MPStatus {
