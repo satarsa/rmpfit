@@ -416,6 +416,8 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             }
         }
     }
+
+    fn qrfac(&mut self) {}
 }
 
 pub fn mpfit<T: MPFitter>(
@@ -481,6 +483,36 @@ pub fn mpfit<T: MPFitter>(
         }
         // Calculate the Jacobian matrix
         fit.fdjack2(&config);
+        if fit.qanylim {
+            for j in 0..fit.nfree {
+                let lpegged = j < fit.qllim.len() && fit.x[j] == fit.llim[j];
+                let upegged = j < fit.qulim.len() && fit.x[j] == fit.ulim[j];
+                let mut sum = 0.;
+                // If the parameter is pegged at a limit, compute the gradient direction
+                let ij = j * fit.m;
+                if lpegged || upegged {
+                    for i in 0..fit.m {
+                        sum += fit.fvec[i] * fit.fjack[ij + i];
+                    }
+                }
+                // If pegged at lower limit and gradient is toward negative then
+                // reset gradient to zero
+                if lpegged && sum > 0. {
+                    for i in 0..fit.m {
+                        fit.fjack[ij + i] = 0.;
+                    }
+                }
+                // If pegged at upper limit and gradient is toward positive then
+                // reset gradient to zero
+                if upegged && sum < 0. {
+                    for i in 0..fit.m {
+                        fit.fjack[ij + i] = 0.;
+                    }
+                }
+            }
+        }
+        // Compute the QR factorization of the jacobian
+        fit.qrfac();
         break;
     }
     MPResult::Success(
