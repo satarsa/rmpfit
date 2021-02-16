@@ -176,7 +176,7 @@ const MP_RDWARF: f64 = 1.8269129289596699e-153;
 /// f64::MAX.sqrt() * 0.1
 const MP_RGIANT: f64 = 1.3407807799935083e+153;
 
-struct MPFit<'a> {
+struct MPFit<'a, F: MPFitter> {
     m: usize,
     npar: usize,
     nfree: usize,
@@ -191,10 +191,17 @@ struct MPFit<'a> {
     side: Vec<MPSide>,
     step: Vec<f64>,
     dstep: Vec<f64>,
+    qllim: Vec<bool>,
+    qulim: Vec<bool>,
+    llim: Vec<f64>,
+    ulim: Vec<f64>,
+    qanylim: bool,
+    f: &'a F,
+    wa4: Vec<f64>,
 }
 
-impl<'a> MPFit<'a> {
-    fn new(m: usize, xall: &[f64]) -> Option<MPFit> {
+impl<'a, F: MPFitter> MPFit<'a, F> {
+    fn new(m: usize, xall: &'a [f64], f: &'a F) -> Option<MPFit<'a, F>> {
         let npar = xall.len();
         if m == 0 {
             None
@@ -211,9 +218,16 @@ impl<'a> MPFit<'a> {
                 xall: &xall,
                 qtf: vec![],
                 fjack: vec![],
-                side: Vec::with_capacity(npar),
-                step: Vec::with_capacity(npar),
-                dstep: Vec::with_capacity(npar),
+                side: vec![],
+                step: vec![],
+                dstep: vec![],
+                qllim: vec![],
+                qulim: vec![],
+                llim: vec![],
+                ulim: vec![],
+                qanylim: false,
+                f,
+                wa4: vec![0.; m],
             })
         }
     }
@@ -367,22 +381,38 @@ impl<'a> MPFit<'a> {
     ///     argonne national laboratory. minpack project. march 1980.
     ///     burton s. garbow, kenneth e. hillstrom, jorge j. more
     ///
-    fn fdjack2(&self, config: &MPConfig) {
+    fn fdjack2(&mut self, config: &MPConfig) {
         let eps = config.epsfcn.max(f64::EPSILON).sqrt();
         // TODO: sides are not going to be used, probably clean them up after
         // TODO: probably analytical derivatives should be implemented at some point
+        let mut ij = 0;
         for j in 0..self.nfree {
             let free_p = self.ifree[j];
             let temp = self.x[free_p];
             let mut h = eps * temp.abs();
-            if self.step.len() > free_p && self.step[free_p] > 0. {
+            if free_p < self.step.len() && self.step[free_p] > 0. {
                 h = self.step[free_p];
             }
-            if self.dstep.len() > free_p && self.dstep[free_p] > 0. {
+            if free_p < self.dstep.len() && self.dstep[free_p] > 0. {
                 h = (self.dstep[free_p] * temp).abs();
             }
             if h == 0. {
                 h = eps;
+            }
+            if j < self.qulim.len()
+                && self.qulim[j]
+                && j < self.ulim.len()
+                && temp > self.ulim[j] - h
+            {
+                h = -h;
+            }
+            self.x[self.ifree[j]] = temp + h;
+            self.f.eval(&self.x, &mut self.wa4);
+            self.nfev += 1;
+            self.x[self.ifree[j]] = temp;
+            for i in 0..self.m {
+                self.fjack[ij] = (self.wa4[i] - self.fvec[i]) / h;
+                ij += 1;
             }
         }
     }
@@ -394,7 +424,7 @@ pub fn mpfit<T: MPFitter>(
     params: Option<&[MPPar]>,
     config: &MPConfig,
 ) -> MPResult {
-    let mut fit = match MPFit::new(f.number_of_points(), xall) {
+    let mut fit = match MPFit::new(f.number_of_points(), xall, &f) {
         None => return MPResult::Error(MPError::Empty),
         Some(v) => v,
     };
@@ -408,7 +438,15 @@ pub fn mpfit<T: MPFitter>(
                 return MPResult::Error(MPError::Empty);
             }
             for (i, p) in pars.iter().enumerate() {
-                if !p.fixed {
+                if p.fixed {
+                    fit.qllim.push(p.limited_low);
+                    fit.qulim.push(p.limited_up);
+                    fit.llim.push(p.limit_low);
+                    fit.ulim.push(p.limit_up);
+                    if p.limited_low || p.limited_up {
+                        fit.qanylim = true;
+                    }
+                } else {
                     fit.nfree += 1;
                     fit.ifree.push(i);
                 }
