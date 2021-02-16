@@ -29,6 +29,7 @@ impl ::std::default::Default for MPPar {
 }
 
 /// Sidedness of finite difference derivative
+#[derive(Copy, Clone)]
 pub enum MPSide {
     /// one-sided derivative computed automatically
     Auto,
@@ -165,7 +166,7 @@ pub struct MPStatus {
 }
 
 pub trait MPFitter {
-    fn eval(&self, params: &[f64], deviates: &mut [f64], derivs: Option<&mut [f64]>);
+    fn eval(&self, params: &[f64], deviates: &mut [f64]);
 
     fn number_of_points(&self) -> usize;
 }
@@ -187,25 +188,32 @@ struct MPFit<'a> {
     xall: &'a [f64],
     qtf: Vec<f64>,
     fjack: Vec<f64>,
+    side: Vec<MPSide>,
+    step: Vec<f64>,
+    dstep: Vec<f64>,
 }
 
 impl<'a> MPFit<'a> {
     fn new(m: usize, xall: &[f64]) -> Option<MPFit> {
+        let npar = xall.len();
         if m == 0 {
             None
         } else {
             Some(MPFit {
                 m,
-                npar: xall.len(),
+                npar,
                 nfree: 0,
                 ifree: vec![],
                 fvec: vec![0.; m],
                 nfev: 1,
-                xnew: vec![],
+                xnew: vec![0.; npar],
                 x: vec![],
                 xall: &xall,
                 qtf: vec![],
                 fjack: vec![],
+                side: Vec::with_capacity(npar),
+                step: Vec::with_capacity(npar),
+                dstep: Vec::with_capacity(npar),
             })
         }
     }
@@ -286,6 +294,98 @@ impl<'a> MPFit<'a> {
             x3max * s3.sqrt()
         }
     }
+
+    ///     subroutine fdjac2
+    ///
+    ///     this subroutine computes a forward-difference approximation
+    ///     to the m by n jacobian matrix associated with a specified
+    ///     problem of m functions in n variables.
+    ///
+    ///     the subroutine statement is
+    ///
+    ///	subroutine fdjac2(fcn,m,n,x,fvec,fjac,ldfjac,iflag,epsfcn,wa)
+    ///
+    ///     where
+    ///
+    ///	fcn is the name of the user-supplied subroutine which
+    ///	  calculates the functions. fcn must be declared
+    ///	  in an external statement in the user calling
+    ///	  program, and should be written as follows.
+    ///
+    ///	  subroutine fcn(m,n,x,fvec,iflag)
+    ///	  integer m,n,iflag
+    ///	  double precision x(n),fvec(m)
+    ///	  ----------
+    ///	  calculate the functions at x and
+    ///	  return this vector in fvec.
+    ///	  ----------
+    ///	  return
+    ///	  end
+    ///
+    ///	  the value of iflag should not be changed by fcn unless
+    ///	  the user wants to terminate execution of fdjac2.
+    ///	  in this case set iflag to a negative integer.
+    ///
+    ///	m is a positive integer input variable set to the number
+    ///	  of functions.
+    ///
+    ///	n is a positive integer input variable set to the number
+    ///	  of variables. n must not exceed m.
+    ///
+    ///	x is an input array of length n.
+    ///
+    ///	fvec is an input array of length m which must contain the
+    ///	  functions evaluated at x.
+    ///
+    ///	fjac is an output m by n array which contains the
+    ///	  approximation to the jacobian matrix evaluated at x.
+    ///
+    ///	ldfjac is a positive integer input variable not less than m
+    ///	  which specifies the leading dimension of the array fjac.
+    ///
+    ///	iflag is an integer variable which can be used to terminate
+    ///	  the execution of fdjac2. see description of fcn.
+    ///
+    ///	epsfcn is an input variable used in determining a suitable
+    ///	  step length for the forward-difference approximation. this
+    ///	  approximation assumes that the relative errors in the
+    ///	  functions are of the order of epsfcn. if epsfcn is less
+    ///	  than the machine precision, it is assumed that the relative
+    ///	  errors in the functions are of the order of the machine
+    ///	  precision.
+    ///
+    ///	wa is a work array of length m.
+    ///
+    ///     subprograms called
+    ///
+    ///	user-supplied ...... fcn
+    ///
+    ///	minpack-supplied ... dpmpar
+    ///
+    ///	fortran-supplied ... dabs,dmax1,dsqrt
+    ///
+    ///     argonne national laboratory. minpack project. march 1980.
+    ///     burton s. garbow, kenneth e. hillstrom, jorge j. more
+    ///
+    fn fdjack2(&self, config: &MPConfig) {
+        let eps = config.epsfcn.max(f64::EPSILON).sqrt();
+        // TODO: sides are not going to be used, probably clean them up after
+        // TODO: probably analytical derivatives should be implemented at some point
+        for j in 0..self.nfree {
+            let free_p = self.ifree[j];
+            let temp = self.x[free_p];
+            let mut h = eps * temp.abs();
+            if self.step.len() > free_p && self.step[free_p] > 0. {
+                h = self.step[free_p];
+            }
+            if self.dstep.len() > free_p && self.dstep[free_p] > 0. {
+                h = (self.dstep[free_p] * temp).abs();
+            }
+            if h == 0. {
+                h = eps;
+            }
+        }
+    }
 }
 
 pub fn mpfit<T: MPFitter>(
@@ -312,6 +412,9 @@ pub fn mpfit<T: MPFitter>(
                     fit.nfree += 1;
                     fit.ifree.push(i);
                 }
+                fit.side.push(p.side);
+                fit.step.push(p.step);
+                fit.dstep.push(p.rel_step);
             }
             if fit.nfree == 0 {
                 return MPResult::Error(MPError::NoFree);
@@ -321,10 +424,9 @@ pub fn mpfit<T: MPFitter>(
     if fit.m < fit.nfree {
         return MPResult::Error(MPError::DoF);
     }
-    f.eval(fit.xall, &mut fit.fvec, None);
+    f.eval(fit.xall, &mut fit.fvec);
     let fnorm = fit.enorm();
     let orig_norm = fnorm * fnorm;
-    fit.xnew = vec![0.; fit.npar];
     fit.xnew.copy_from_slice(fit.xall);
     fit.x = Vec::with_capacity(fit.nfree);
     for i in 0..fit.nfree {
@@ -340,7 +442,7 @@ pub fn mpfit<T: MPFitter>(
             fit.xnew[fit.ifree[i]] = fit.x[i];
         }
         // Calculate the Jacobian matrix
-
+        fit.fdjack2(&config);
         break;
     }
     MPResult::Success(
@@ -374,7 +476,7 @@ mod tests {
         };
 
         impl MPFitter for Linear {
-            fn eval(&self, params: &[f64], deviates: &mut [f64], derivs: Option<&mut [f64]>) {
+            fn eval(&self, params: &[f64], deviates: &mut [f64]) {
                 for (((d, x), y), ye) in deviates
                     .iter_mut()
                     .zip(self.x.iter())
