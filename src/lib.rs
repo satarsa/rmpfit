@@ -171,7 +171,7 @@ struct MPFit<'a, F: MPFitter> {
     nfev: usize,
     xnew: Vec<f64>,
     x: Vec<f64>,
-    xall: &'a [f64],
+    xall: &'a mut [f64],
     qtf: Vec<f64>,
     fjack: Vec<f64>,
     step: Vec<f64>,
@@ -200,7 +200,7 @@ struct MPFit<'a, F: MPFitter> {
 }
 
 impl<'a, F: MPFitter> MPFit<'a, F> {
-    fn new(m: usize, xall: &'a [f64], f: &'a F, cfg: &'a MPConfig) -> Option<MPFit<'a, F>> {
+    fn new(m: usize, xall: &'a mut [f64], f: &'a F, cfg: &'a MPConfig) -> Option<MPFit<'a, F>> {
         let npar = xall.len();
         if m == 0 {
             None
@@ -214,7 +214,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 nfev: 1,
                 xnew: vec![0.; npar],
                 x: vec![],
-                xall: &xall,
+                xall,
                 qtf: vec![],
                 fjack: vec![],
                 step: vec![],
@@ -698,6 +698,16 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             },
         )
     }
+
+    fn rescale(&mut self) {
+        if self.cfg.do_user_scale {
+            return;
+        }
+        for j in 0..self.nfree {
+            let i = self.ifree[j];
+            self.diag[i] = self.diag[i].max(self.wa2[j]);
+        }
+    }
 }
 
 pub fn mpfit<T: MPFitter>(
@@ -737,6 +747,7 @@ pub fn mpfit<T: MPFitter>(
             fit.info = MPSuccess::MaxIter;
             return fit.terminate();
         }
+        fit.rescale();
         return fit.terminate();
     }
 }
