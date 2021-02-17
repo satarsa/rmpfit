@@ -9,8 +9,6 @@ pub struct MPPar {
     pub step: f64,
     /// Relative step size for finite difference
     pub rel_step: f64,
-    /// Sidedness of finite difference derivative
-    pub side: MPSide,
 }
 
 impl ::std::default::Default for MPPar {
@@ -23,24 +21,8 @@ impl ::std::default::Default for MPPar {
             limit_up: 0.0,
             step: 0.0,
             rel_step: 0.0,
-            side: MPSide::Auto,
         }
     }
-}
-
-/// Sidedness of finite difference derivative
-#[derive(Copy, Clone)]
-pub enum MPSide {
-    /// one-sided derivative computed automatically
-    Auto,
-    /// one-sided derivative (f(x+h) - f(x)  )/h
-    Right,
-    /// one-sided derivative (f(x)   - f(x-h))/h
-    Left,
-    /// two-sided derivative (f(x+h) - f(x-h))/(2*h)
-    Both,
-    /// user-computed analytical derivatives
-    User,
 }
 
 /// Definition of MPFIT configuration structure
@@ -191,7 +173,6 @@ struct MPFit<'a, F: MPFitter> {
     xall: &'a [f64],
     qtf: Vec<f64>,
     fjack: Vec<f64>,
-    side: Vec<MPSide>,
     step: Vec<f64>,
     dstep: Vec<f64>,
     qllim: Vec<bool>,
@@ -234,7 +215,6 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 xall: &xall,
                 qtf: vec![],
                 fjack: vec![],
-                side: vec![],
                 step: vec![],
                 dstep: vec![],
                 qllim: vec![],
@@ -335,8 +315,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
     ///
     fn fdjack2(&mut self, config: &MPConfig) {
         let eps = config.epsfcn.max(f64::EPSILON).sqrt();
-        // TODO: sides are not going to be used, probably clean them up after
-        // TODO: probably analytical derivatives should be implemented at some point
+        // TODO: probably sides and analytical derivatives should be implemented at some point
         let mut ij = 0;
         for j in 0..self.nfree {
             let free_p = self.ifree[j];
@@ -547,7 +526,6 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                         self.nfree += 1;
                         self.ifree.push(i);
                     }
-                    self.side.push(p.side);
                     self.step.push(p.step);
                     self.dstep.push(p.rel_step);
                 }
