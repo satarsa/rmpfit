@@ -97,6 +97,7 @@ impl ::std::default::Default for MPConfig {
 
 /// MP Fit errors
 pub enum MPError {
+    NoError,
     /// General input parameter error
     Input,
     /// User function produced non-finite values
@@ -522,6 +523,44 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             self.wa1[j] = -ajnorm;
         }
     }
+
+    fn parse_params(&mut self, params: Option<&[MPPar]>) -> MPError {
+        match &params {
+            None => {
+                self.nfree = self.npar;
+                self.ifree = (0..self.npar).collect();
+            }
+            Some(pars) => {
+                if pars.len() == 0 {
+                    return MPError::Empty;
+                }
+                for (i, p) in pars.iter().enumerate() {
+                    if p.fixed {
+                        self.qllim.push(p.limited_low);
+                        self.qulim.push(p.limited_up);
+                        self.llim.push(p.limit_low);
+                        self.ulim.push(p.limit_up);
+                        if p.limited_low || p.limited_up {
+                            self.qanylim = true;
+                        }
+                    } else {
+                        self.nfree += 1;
+                        self.ifree.push(i);
+                    }
+                    self.side.push(p.side);
+                    self.step.push(p.step);
+                    self.dstep.push(p.rel_step);
+                }
+                if self.nfree == 0 {
+                    return MPError::NoFree;
+                }
+            }
+        };
+        if self.m < self.nfree {
+            return MPError::DoF;
+        }
+        MPError::NoError
+    }
 }
 
 pub fn mpfit<T: MPFitter>(
@@ -534,39 +573,10 @@ pub fn mpfit<T: MPFitter>(
         None => return MPResult::Error(MPError::Empty),
         Some(v) => v,
     };
-    match &params {
-        None => {
-            fit.nfree = fit.npar;
-            fit.ifree = (0..fit.npar).collect();
-        }
-        Some(pars) => {
-            if pars.len() == 0 {
-                return MPResult::Error(MPError::Empty);
-            }
-            for (i, p) in pars.iter().enumerate() {
-                if p.fixed {
-                    fit.qllim.push(p.limited_low);
-                    fit.qulim.push(p.limited_up);
-                    fit.llim.push(p.limit_low);
-                    fit.ulim.push(p.limit_up);
-                    if p.limited_low || p.limited_up {
-                        fit.qanylim = true;
-                    }
-                } else {
-                    fit.nfree += 1;
-                    fit.ifree.push(i);
-                }
-                fit.side.push(p.side);
-                fit.step.push(p.step);
-                fit.dstep.push(p.rel_step);
-            }
-            if fit.nfree == 0 {
-                return MPResult::Error(MPError::NoFree);
-            }
-        }
-    };
-    if fit.m < fit.nfree {
-        return MPResult::Error(MPError::DoF);
+    let params_error = fit.parse_params(params);
+    match &params_error {
+        MPError::NoError => (),
+        _ => return MPResult::Error(params_error),
     }
     f.eval(fit.xall, &mut fit.fvec);
     fit.fnorm = fit.fvec.enorm();
