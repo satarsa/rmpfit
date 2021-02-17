@@ -195,10 +195,11 @@ struct MPFit<'a, F: MPFitter> {
     orig_norm: f64,
     par: f64,
     iter: usize,
+    cfg: &'a MPConfig,
 }
 
 impl<'a, F: MPFitter> MPFit<'a, F> {
-    fn new(m: usize, xall: &'a [f64], f: &'a F) -> Option<MPFit<'a, F>> {
+    fn new(m: usize, xall: &'a [f64], f: &'a F, cfg: &'a MPConfig) -> Option<MPFit<'a, F>> {
         let npar = xall.len();
         if m == 0 {
             None
@@ -237,6 +238,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 orig_norm: 0.0,
                 par: 0.0,
                 iter: 1,
+                cfg,
             })
         }
     }
@@ -314,6 +316,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
     ///     burton s. garbow, kenneth e. hillstrom, jorge j. more
     ///
     fn fdjack2(&mut self, config: &MPConfig) {
+        // Calculate the Jacobian matrix
         let eps = config.epsfcn.max(f64::EPSILON).sqrt();
         // TODO: probably sides and analytical derivatives should be implemented at some point
         let mut ij = 0;
@@ -420,6 +423,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
     ///     argonne national laboratory. minpack project. march 1980.
     ///     burton s. garbow, kenneth e. hillstrom, jorge j. more
     fn qrfac(&mut self) {
+        // Compute the QR factorization of the jacobian
         // compute the initial column norms and initialize several arrays.
         let mut ij = 0;
         for j in 0..self.nfree {
@@ -553,6 +557,69 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         self.qtf = vec![0.; self.nfree];
         self.fjack = vec![0.; self.m * self.nfree];
     }
+
+    fn check_limits(&mut self) {
+        if !self.qanylim {
+            return;
+        }
+        for j in 0..self.nfree {
+            let lpegged = j < self.qllim.len() && self.x[j] == self.llim[j];
+            let upegged = j < self.qulim.len() && self.x[j] == self.ulim[j];
+            let mut sum = 0.;
+            // If the parameter is pegged at a limit, compute the gradient direction
+            let ij = j * self.m;
+            if lpegged || upegged {
+                for i in 0..self.m {
+                    sum += self.fvec[i] * self.fjack[ij + i];
+                }
+            }
+            // If pegged at lower limit and gradient is toward negative then
+            // reset gradient to zero
+            if lpegged && sum > 0. {
+                for i in 0..self.m {
+                    self.fjack[ij + i] = 0.;
+                }
+            }
+            // If pegged at upper limit and gradient is toward positive then
+            // reset gradient to zero
+            if upegged && sum < 0. {
+                for i in 0..self.m {
+                    self.fjack[ij + i] = 0.;
+                }
+            }
+        }
+    }
+
+    fn scale(&mut self) {
+        //	 on the first iteration and if mode is 1, scale according
+        //	 to the norms of the columns of the initial jacobian.
+        if self.iter != 1 {
+            return;
+        }
+        if !self.cfg.do_user_scale {
+            for j in 0..self.nfree {
+                self.diag[self.ifree[j]] = if self.wa2[j] == 0. { 1. } else { self.wa2[j] };
+            }
+        }
+        /*
+         *	 on the first iteration, calculate the norm of the scaled x
+         *	 and initialize the step bound delta.
+         */
+        for j in 0..self.nfree {
+            self.wa3[j] = self.diag[self.ifree[j]] * self.x[j];
+        }
+        self.xnorm = self.wa3.enorm();
+        self.delta = self.cfg.step_factor * self.xnorm;
+        if self.delta == 0. {
+            self.delta = self.cfg.step_factor;
+        }
+    }
+
+    fn fill_xnew(&mut self) {
+        for i in 0..self.nfree {
+            self.xnew[self.ifree[i]] = self.x[i];
+        }
+    }
 }
 
 pub fn mpfit<T: MPFitter>(
@@ -561,7 +628,7 @@ pub fn mpfit<T: MPFitter>(
     params: Option<&[MPPar]>,
     config: &MPConfig,
 ) -> MPResult {
-    let mut fit = match MPFit::new(f.number_of_points(), xall, &f) {
+    let mut fit = match MPFit::new(f.number_of_points(), xall, &f, config) {
         None => return MPResult::Error(MPError::Empty),
         Some(v) => v,
     };
@@ -572,64 +639,11 @@ pub fn mpfit<T: MPFitter>(
     }
     fit.init_lm();
     loop {
-        for i in 0..fit.nfree {
-            fit.xnew[fit.ifree[i]] = fit.x[i];
-        }
-        // Calculate the Jacobian matrix
+        fit.fill_xnew();
         fit.fdjack2(&config);
-        if fit.qanylim {
-            for j in 0..fit.nfree {
-                let lpegged = j < fit.qllim.len() && fit.x[j] == fit.llim[j];
-                let upegged = j < fit.qulim.len() && fit.x[j] == fit.ulim[j];
-                let mut sum = 0.;
-                // If the parameter is pegged at a limit, compute the gradient direction
-                let ij = j * fit.m;
-                if lpegged || upegged {
-                    for i in 0..fit.m {
-                        sum += fit.fvec[i] * fit.fjack[ij + i];
-                    }
-                }
-                // If pegged at lower limit and gradient is toward negative then
-                // reset gradient to zero
-                if lpegged && sum > 0. {
-                    for i in 0..fit.m {
-                        fit.fjack[ij + i] = 0.;
-                    }
-                }
-                // If pegged at upper limit and gradient is toward positive then
-                // reset gradient to zero
-                if upegged && sum < 0. {
-                    for i in 0..fit.m {
-                        fit.fjack[ij + i] = 0.;
-                    }
-                }
-            }
-        }
-        // Compute the QR factorization of the jacobian
+        fit.check_limits();
         fit.qrfac();
-        /*
-         *	 on the first iteration and if mode is 1, scale according
-         *	 to the norms of the columns of the initial jacobian.
-         */
-        if fit.iter == 1 {
-            if !config.do_user_scale {
-                for j in 0..fit.nfree {
-                    fit.diag[fit.ifree[j]] = if fit.wa2[j] == 0. { 1. } else { fit.wa2[j] };
-                }
-            }
-            /*
-             *	 on the first iteration, calculate the norm of the scaled x
-             *	 and initialize the step bound delta.
-             */
-            for j in 0..fit.nfree {
-                fit.wa3[j] = fit.diag[fit.ifree[j]] * fit.x[j];
-            }
-            fit.xnorm = fit.wa3.enorm();
-            fit.delta = config.step_factor * fit.xnorm;
-            if fit.delta == 0. {
-                fit.delta = config.step_factor;
-            }
-        }
+        fit.scale();
         /*
          *	 form (q transpose)*fvec and store the first n components in
          *	 qtf.
