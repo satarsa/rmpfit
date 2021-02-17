@@ -590,9 +590,10 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         }
     }
 
+    /// On the first iteration and if user_scale is requested, scale according
+    /// to the norms of the columns of the initial jacobian,
+    /// calculate the norm of the scaled x, and initialize the step bound delta.
     fn scale(&mut self) {
-        //	 on the first iteration and if mode is 1, scale according
-        //	 to the norms of the columns of the initial jacobian.
         if self.iter != 1 {
             return;
         }
@@ -601,10 +602,6 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 self.diag[self.ifree[j]] = if self.wa2[j] == 0. { 1. } else { self.wa2[j] };
             }
         }
-        /*
-         *	 on the first iteration, calculate the norm of the scaled x
-         *	 and initialize the step bound delta.
-         */
         for j in 0..self.nfree {
             self.wa3[j] = self.diag[self.ifree[j]] * self.x[j];
         }
@@ -619,6 +616,67 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         for i in 0..self.nfree {
             self.xnew[self.ifree[i]] = self.x[i];
         }
+    }
+
+    /// form (q transpose)*fvec and store the first n components in qtf.
+    fn transpose(&mut self) {
+        self.wa4.copy_from_slice(&self.fvec);
+        let mut jj = 0;
+        for j in 0..self.nfree {
+            let temp = self.fjack[jj];
+            if temp != 0. {
+                let mut sum = 0.0;
+                let mut ij = jj;
+                for i in j..self.m {
+                    sum += self.fjack[ij] * self.wa4[i];
+                    ij += 1;
+                }
+                let temp = -sum / temp;
+                ij = jj;
+                for i in j..self.m {
+                    self.wa4[i] += self.fjack[ij] * temp;
+                    ij += 1;
+                }
+            }
+            self.fjack[jj] = self.wa1[j];
+            jj += self.m + 1;
+            self.qtf[j] = self.wa4[j];
+        }
+    }
+
+    /// Check for overflow.  This should be a cheap test here since FJAC
+    /// has been reduced to a (small) square matrix, and the test is O(N^2).
+    fn check_is_finite(&self) -> bool {
+        if !self.cfg.no_finite_check {
+            for val in &self.fjack {
+                if !val.is_finite() {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    ///	 compute the norm of the scaled gradient.
+    fn gnorm(&self) -> f64 {
+        let mut gnorm: f64 = 0.;
+        if self.fnorm != 0. {
+            let mut jj = 0;
+            for j in 0..self.nfree {
+                let l = self.ipvt[j];
+                if self.wa2[l] != 0. {
+                    let mut sum = 0.;
+                    let mut ij = jj;
+                    for i in 0..=j {
+                        sum += self.fjack[ij] * (self.qtf[i] / self.fnorm);
+                        ij += 1;
+                    }
+                    gnorm = gnorm.max((sum / self.wa2[l]).abs());
+                }
+                jj += self.m;
+            }
+        }
+        gnorm
     }
 }
 
@@ -644,64 +702,11 @@ pub fn mpfit<T: MPFitter>(
         fit.check_limits();
         fit.qrfac();
         fit.scale();
-        /*
-         *	 form (q transpose)*fvec and store the first n components in
-         *	 qtf.
-         */
-        fit.wa4.copy_from_slice(&fit.fvec);
-        let mut jj = 0;
-        for j in 0..fit.nfree {
-            let temp = fit.fjack[jj];
-            if temp != 0. {
-                let mut sum = 0.0;
-                let mut ij = jj;
-                for i in j..fit.m {
-                    sum += fit.fjack[ij] * fit.wa4[i];
-                    ij += 1;
-                }
-                let temp = -sum / temp;
-                ij = jj;
-                for i in j..fit.m {
-                    fit.wa4[i] += fit.fjack[ij] * temp;
-                    ij += 1;
-                }
-            }
-            fit.fjack[jj] = fit.wa1[j];
-            jj += fit.m + 1;
-            fit.qtf[j] = fit.wa4[j];
+        fit.transpose();
+        if !fit.check_is_finite() {
+            return MPResult::Error(MPError::Nan);
         }
-        /* ( From this point on, only the square matrix, consisting of the
-        triangle of R, is needed.) */
-        if config.no_finite_check {
-            /* Check for overflow.  This should be a cheap test here since FJAC
-            has been reduced to a (small) square matrix, and the test is
-            O(N^2). */
-            for val in &fit.fjack {
-                if !val.is_finite() {
-                    return MPResult::Error(MPError::Nan);
-                }
-            }
-        }
-        /*
-         *	 compute the norm of the scaled gradient.
-         */
-        let mut gnorm: f64 = 0.;
-        if fit.fnorm != 0. {
-            let mut jj = 0;
-            for j in 0..fit.nfree {
-                let l = fit.ipvt[j];
-                if fit.wa2[l] != 0. {
-                    let mut sum = 0.;
-                    let mut ij = jj;
-                    for i in 0..=j {
-                        sum += fit.fjack[ij] * (fit.qtf[i] / fit.fnorm);
-                        ij += 1;
-                    }
-                    gnorm = gnorm.max((sum / fit.wa2[l]).abs());
-                }
-                jj += fit.m;
-            }
-        }
+        let gnorm = fit.gnorm();
         if gnorm <= config.gtol {
             fit.info = MPSuccess::Dir;
         }
