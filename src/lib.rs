@@ -210,6 +210,9 @@ struct MPFit<'a, F: MPFitter> {
     xnorm: f64,
     delta: f64,
     info: MPSuccess,
+    orig_norm: f64,
+    par: f64,
+    iter: usize,
 }
 
 impl<'a, F: MPFitter> MPFit<'a, F> {
@@ -250,6 +253,9 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 xnorm: -1.0,
                 delta: 0.0,
                 info: MPSuccess::Error,
+                orig_norm: 0.0,
+                par: 0.0,
+                iter: 1,
             })
         }
     }
@@ -564,15 +570,13 @@ pub fn mpfit<T: MPFitter>(
     }
     f.eval(fit.xall, &mut fit.fvec);
     fit.fnorm = fit.fvec.enorm();
-    let orig_norm = fit.fnorm * fit.fnorm;
+    fit.orig_norm = fit.fnorm * fit.fnorm;
     fit.xnew.copy_from_slice(fit.xall);
     fit.x = Vec::with_capacity(fit.nfree);
     for i in 0..fit.nfree {
         fit.x.push(fit.xall[fit.ifree[i]]);
     }
     // Initialize Levenberg-Marquardt parameter and iteration counter
-    let par = 0.0;
-    let mut iter = 1;
     fit.qtf = vec![0.; fit.nfree];
     fit.fjack = vec![0.; fit.m * fit.nfree];
     loop {
@@ -615,7 +619,7 @@ pub fn mpfit<T: MPFitter>(
          *	 on the first iteration and if mode is 1, scale according
          *	 to the norms of the columns of the initial jacobian.
          */
-        if iter == 1 {
+        if fit.iter == 1 {
             if !config.do_user_scale {
                 for j in 0..fit.nfree {
                     fit.diag[fit.ifree[j]] = if fit.wa2[j] == 0. { 1. } else { fit.wa2[j] };
