@@ -708,6 +708,210 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             self.diag[i] = self.diag[i].max(self.wa2[j]);
         }
     }
+
+    /// subroutine lmpar
+    ///
+    /// given an m by nfree matrix a, an nfree by nfree nonsingular diagonal
+    /// matrix d, an m-vector b, and a positive number delta,
+    /// the problem is to determine a value for the parameter
+    /// par such that if wa1 solves the system
+    ///
+    ///	    a*wa1 = b ,	  sqrt(par)*d*wa1 = 0 ,
+    ///
+    /// in the least squares sense, and dxnorm is the euclidean
+    /// norm of d*wa1, then either par is zero and
+    ///
+    ///	    (dxnorm-delta) .le. 0.1*delta ,
+    ///
+    /// or par is positive and
+    ///
+    ///	    abs(dxnorm-delta) .le. 0.1*delta .
+    ///
+    /// this subroutine completes the solution of the problem
+    /// if it is provided with the necessary information from the
+    /// qr factorization, with column pivoting, of a. that is, if
+    /// a*p = q*fjack, where p is a permutation matrix, q has orthogonal
+    /// columns, and fjack is an upper triangular matrix with diagonal
+    /// elements of nonincreasing magnitude, then lmpar expects
+    /// the full upper triangle of fjack, the permutation matrix p,
+    /// and the first nfree components of (q transpose)*b. on output
+    /// lmpar also provides an upper triangular matrix s such that
+    ///
+    ///	     t	 t		     t
+    ///	    p *(a *a + par*d*d)*p = s *s .
+    ///
+    /// s is employed within lmpar and may be of separate interest.
+    ///
+    /// only a few iterations are generally needed for convergence
+    /// of the algorithm. if, however, the limit of 10 iterations
+    /// is reached, then the output par will contain the best
+    /// value obtained so far.
+    ///
+    /// the subroutine statement is
+    ///
+    ///	subroutine lmpar(nfree,fjack,m,ipvt,diag,qtf,delta,par,wa1,wa2,
+    ///			 wa3,wa4)
+    ///
+    /// where
+    ///
+    ///	nfree is a positive integer input variable set to the order of fjack.
+    ///
+    ///	fjack is an nfree by nfree array. on input the full upper triangle
+    ///	  must contain the full upper triangle of the matrix fjack.
+    ///	  on output the full upper triangle is unaltered, and the
+    ///	  strict lower triangle contains the strict upper triangle
+    ///	  (transposed) of the upper triangular matrix s.
+    ///
+    ///	m is a positive integer input variable not less than nfree
+    ///	  which specifies the leading dimension of the array fjack.
+    ///
+    ///	ipvt is an integer input array of length nfree which defines the
+    ///	  permutation matrix p such that a*p = q*fjack. column j of p
+    ///	  is column ipvt(j) of the identity matrix.
+    ///
+    ///	diag is an input array of length nfree which must contain the
+    ///	  diagonal elements of the matrix d.
+    ///
+    ///	qtf is an input array of length nfree which must contain the first
+    ///	  nfree elements of the vector (q transpose)*b.
+    ///
+    ///	delta is a positive input variable which specifies an upper
+    ///	  bound on the euclidean norm of d*wa1.
+    ///
+    ///	par is a nonnegative variable. on input par contains an
+    ///	  initial estimate of the levenberg-marquardt parameter.
+    ///	  on output par contains the final estimate.
+    ///
+    ///	wa1 is an output array of length nfree which contains the least
+    ///	  squares solution of the system a*wa1 = b, sqrt(par)*d*wa1 = 0,
+    ///	  for the output par.
+    ///
+    ///	wa2 is an output array of length nfree which contains the
+    ///	  diagonal elements of the upper triangular matrix s.
+    ///
+    ///	wa3 and wa4 are work arrays of length nfree.
+    ///
+    /// subprograms called
+    ///
+    ///	minpack-supplied ... dpmpar,mp_enorm,qrsolv
+    ///
+    ///	fortran-supplied ... dabs,mp_dmax1,dmin1,dsqrt
+    ///
+    /// argonne national laboratory. minpack project. march 1980.
+    /// burton s. garbow, kenneth e. hillstrom, jorge j. more
+    fn lmpar(&mut self) {
+        /*
+         *     compute and store in wa1 the gauss-newton direction. if the
+         *     jacobian is rank-deficient, obtain a least squares solution.
+         */
+        let mut nsing = self.nfree;
+        let mut jj = 0;
+        for j in 0..self.nfree {
+            self.wa3[j] = self.qtf[j];
+            if self.fjack[jj] == 0. && nsing == self.nfree {
+                nsing = j;
+            }
+            if nsing < self.nfree {
+                self.wa3[j] = 0.;
+            }
+            jj += self.m + 1;
+        }
+        if nsing >= 1 {
+            for k in 0..nsing {
+                let j = nsing - k - 1;
+                let mut ij = self.m * j;
+                self.wa3[j] /= self.fjack[j + ij];
+                let temp = self.wa3[j];
+                if j > 0 {
+                    for i in 0..j {
+                        self.wa3[i] -= self.fjack[ij] * temp;
+                        ij += 1;
+                    }
+                }
+            }
+        }
+        for j in 0..self.nfree {
+            self.wa1[self.ipvt[j]] = self.wa3[j];
+        }
+        /*
+         *     initialize the iteration counter.
+         *     evaluate the function at the origin, and test
+         *     for acceptance of the gauss-newton direction.
+         */
+        for j in 0..self.nfree {
+            self.wa4[j] = self.diag[self.ifree[j]] * self.wa1[j];
+        }
+        let dxnorm = self.wa4[0..self.nfree].enorm();
+        let fp = dxnorm - self.delta;
+        if fp <= 0.1 * self.delta {
+            self.par = 0.;
+            return;
+        }
+        /*
+         *     if the jacobian is not rank deficient, the newton
+         *     step provides a lower bound, parl, for the zero of
+         *     the function. otherwise set this bound to zero.
+         */
+        let mut parl = 0.;
+        if nsing >= self.nfree {
+            for j in 0..self.nfree {
+                let l = self.ipvt[j];
+                self.wa3[j] = self.diag[self.ifree[l]] * (self.wa4[l] / dxnorm);
+            }
+            let mut jj = 0;
+            for j in 0..self.nfree {
+                let mut sum = 0.;
+                if j > 0 {
+                    let mut ij = jj;
+                    for i in 0..j {
+                        sum += self.fjack[ij] * self.wa3[i];
+                        ij += 1;
+                    }
+                }
+                self.wa3[j] = (self.wa3[j] - sum) / self.fjack[j + self.m * j];
+                jj += self.m;
+            }
+            let temp = self.wa3[0..self.nfree].enorm();
+            parl = ((fp / self.delta) / temp) / temp;
+        }
+        /*
+         *     calculate an upper bound, paru, for the zero of the function.
+         */
+        let mut jj = 0;
+        for j in 0..self.nfree {
+            let mut sum = 0.;
+            let mut ij = jj;
+            for i in 0..=j {
+                sum += self.fjack[ij] * self.qtf[i];
+                ij += 1;
+            }
+            let l = self.ipvt[j];
+            self.wa3[j] = sum / self.diag[self.ifree[l]];
+            jj += self.m;
+        }
+        let gnorm = self.wa3[0..self.nfree].enorm();
+        let mut paru = gnorm / self.delta;
+        if paru == 0. {
+            paru = f64::MIN_POSITIVE / self.delta.min(0.1);
+        }
+        /*
+         *     if the input par lies outside of the interval (parl,paru),
+         *     set par to the closer endpoint.
+         */
+        self.par = self.par.max(parl);
+        self.par = self.par.max(paru);
+        if self.par == 0. {
+            self.par = gnorm / dxnorm;
+        }
+        let mut iter = 0;
+        loop {
+            iter += 1;
+            if self.par == 0. {
+                self.par = f64::MIN_POSITIVE.max(0.001 * paru);
+            }
+            let temp = self.par.sqrt();
+        }
+    }
 }
 
 pub fn mpfit<T: MPFitter>(
@@ -748,7 +952,10 @@ pub fn mpfit<T: MPFitter>(
             return fit.terminate();
         }
         fit.rescale();
-        return fit.terminate();
+        loop {
+            fit.lmpar();
+            return fit.terminate();
+        }
     }
 }
 
