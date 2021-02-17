@@ -197,7 +197,11 @@ struct MPFit<'a, F: MPFitter> {
     ulim: Vec<f64>,
     qanylim: bool,
     f: &'a F,
+    wa1: Vec<f64>,
+    wa2: Vec<f64>,
+    wa3: Vec<f64>,
     wa4: Vec<f64>,
+    ipvt: Vec<usize>,
 }
 
 impl<'a, F: MPFitter> MPFit<'a, F> {
@@ -227,85 +231,12 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 ulim: vec![],
                 qanylim: false,
                 f,
+                wa1: vec![0.; npar],
+                wa2: vec![0.; m],
+                wa3: vec![0.; npar],
                 wa4: vec![0.; m],
+                ipvt: vec![0; npar],
             })
-        }
-    }
-
-    ///    function enorm
-    ///
-    ///    given an n-vector x, this function calculates the
-    ///    euclidean norm of x.
-    ///
-    ///    the euclidean norm is computed by accumulating the sum of
-    ///    squares in three different sums. the sums of squares for the
-    ///    small and large components are scaled so that no overflows
-    ///    occur. non-destructive underflows are permitted. underflows
-    ///    and overflows do not occur in the computation of the unscaled
-    ///    sum of squares for the intermediate components.
-    ///    the definitions of small, intermediate and large components
-    ///    depend on two constants, rdwarf and rgiant. the main
-    ///    restrictions on these constants are that rdwarf**2 not
-    ///    underflow and rgiant**2 not overflow. the constants
-    ///    given here are suitable for every known computer.
-    ///    the function statement is
-    ///    double precision function enorm(n,x)
-    ///    where
-    ///
-    ///    n is a positive integer input variable.
-    ///
-    ///    x is an input array of length n.
-    ///
-    ///    subprograms called
-    ///
-    ///    fortran-supplied ... dabs,dsqrt
-    ///
-    ///    argonne national laboratory. minpack project. march 1980.
-    ///    burton s. garbow, kenneth e. hillstrom, jorge j. more
-    fn enorm(&self) -> f64 {
-        let mut s1 = 0.;
-        let mut s2 = 0.;
-        let mut s3 = 0.;
-        let mut x1max = 0.;
-        let mut x3max = 0.;
-        let agiant = MP_RGIANT / self.m as f64;
-        for val in &self.fvec {
-            let xabs = val.abs();
-            if xabs > MP_RDWARF && xabs < agiant {
-                // sum for intermediate components.
-                s2 += xabs * xabs;
-            } else if xabs > MP_RDWARF {
-                // sum for large components.
-                if xabs > x1max {
-                    let temp = x1max / xabs;
-                    s1 = 1.0 + s1 * temp * temp;
-                    x1max = xabs;
-                } else {
-                    let temp = xabs / x1max;
-                    s1 += temp * temp;
-                }
-            } else if xabs > x3max {
-                // sum for small components.
-                let temp = x3max / xabs;
-                s3 = 1.0 + s3 * temp * temp;
-                x3max = xabs;
-            } else if xabs != 0.0 {
-                let temp = xabs / x3max;
-                s3 += temp * temp;
-            }
-        }
-        // calculation of norm.
-        if s1 != 0.0 {
-            x1max * (s1 + (s2 / x1max) / x1max).sqrt()
-        } else if s2 != 0.0 {
-            if s2 >= x3max {
-                s2 * (1.0 + (x3max / s2) * (x3max * s3))
-            } else {
-                x3max * ((s2 / x3max) + (x3max * s3))
-            }
-            .sqrt()
-        } else {
-            x3max * s3.sqrt()
         }
     }
 
@@ -417,7 +348,160 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         }
     }
 
-    fn qrfac(&mut self) {}
+    ///     subroutine qrfac
+    ///
+    ///     this subroutine uses householder transformations with column
+    ///     pivoting (optional) to compute a qr factorization of the
+    ///     m by n matrix a. that is, qrfac determines an orthogonal
+    ///     matrix q, a permutation matrix p, and an upper trapezoidal
+    ///     matrix r with diagonal elements of nonincreasing magnitude,
+    ///     such that a*p = q*r. the householder transformation for
+    ///     column k, k = 1,2,...,min(m,n), is of the form
+    ///
+    ///			    t
+    ///	    i - (1/u(k))*u*u
+    ///
+    ///     where u has zeros in the first k-1 positions. the form of
+    ///     this transformation and the method of pivoting first
+    ///     appeared in the corresponding linpack subroutine.
+    ///
+    ///     the subroutine statement is
+    ///
+    ///	subroutine qrfac(m,n,a,lda,pivot,ipvt,lipvt,rdiag,acnorm,wa)
+    ///
+    ///     where
+    ///
+    ///	m is a positive integer input variable set to the number
+    ///	  of rows of a.
+    ///
+    ///	n is a positive integer input variable set to the number
+    ///	  of columns of a.
+    ///
+    ///	a is an m by n array. on input a contains the matrix for
+    ///	  which the qr factorization is to be computed. on output
+    ///	  the strict upper trapezoidal part of a contains the strict
+    ///	  upper trapezoidal part of r, and the lower trapezoidal
+    ///	  part of a contains a factored form of q (the non-trivial
+    ///	  elements of the u vectors described above).
+    ///
+    ///	lda is a positive integer input variable not less than m
+    ///	  which specifies the leading dimension of the array a.
+    ///
+    ///	pivot is a logical input variable. if pivot is set true,
+    ///	  then column pivoting is enforced. if pivot is set false,
+    ///	  then no column pivoting is done.
+    ///
+    ///	ipvt is an integer output array of length lipvt. ipvt
+    ///	  defines the permutation matrix p such that a*p = q*r.
+    ///	  column j of p is column ipvt(j) of the identity matrix.
+    ///	  if pivot is false, ipvt is not referenced.
+    ///
+    ///	lipvt is a positive integer input variable. if pivot is false,
+    ///	  then lipvt may be as small as 1. if pivot is true, then
+    ///	  lipvt must be at least n.
+    ///
+    ///	rdiag is an output array of length n which contains the
+    ///	  diagonal elements of r.
+    ///
+    ///	acnorm is an output array of length n which contains the
+    ///	  norms of the corresponding columns of the input matrix a.
+    ///	  if this information is not needed, then acnorm can coincide
+    ///	  with rdiag.
+    ///
+    ///	wa is a work array of length n. if pivot is false, then wa
+    ///	  can coincide with rdiag.
+    ///
+    ///     subprograms called
+    ///
+    ///	minpack-supplied ... dpmpar,enorm
+    ///
+    ///	fortran-supplied ... dmax1,dsqrt,min0
+    ///
+    ///     argonne national laboratory. minpack project. march 1980.
+    ///     burton s. garbow, kenneth e. hillstrom, jorge j. more
+    fn qrfac(&mut self) {
+        // compute the initial column norms and initialize several arrays.
+        let mut ij = 0;
+        for j in 0..self.nfree {
+            self.wa2[j] = self.fjack[ij..ij + self.m].enorm();
+            self.wa1[j] = self.wa2[j];
+            self.wa3[j] = self.wa1[j];
+            self.ipvt[j] = j;
+            ij += self.m;
+        }
+        // reduce a to r with householder transformations.
+        for j in 0..self.m.min(self.nfree) {
+            // bring the column of largest norm into the pivot position.
+            let mut kmax = j;
+            for k in j..self.nfree {
+                if self.wa1[k] > self.wa1[kmax] {
+                    kmax = k;
+                }
+            }
+            if kmax != j {
+                let mut ij = self.m * j;
+                let mut jj = self.m * kmax;
+                for _ in 0..self.m {
+                    self.fjack.swap(jj, ij);
+                    ij += 1;
+                    jj += 1;
+                }
+                self.wa1[kmax] = self.wa1[j];
+                self.wa3[kmax] = self.wa3[j];
+                self.ipvt.swap(j, kmax);
+            }
+            let jj = j + self.m * j;
+            let mut ajnorm = self.fjack[jj..self.m - j + jj].enorm();
+            if ajnorm == 0. {
+                self.wa1[j] = -ajnorm;
+                continue;
+            }
+            if self.fjack[jj] < 0. {
+                ajnorm = -ajnorm;
+            }
+            ij = jj;
+            for _ in j..self.m {
+                self.fjack[ij] /= ajnorm;
+                ij += 1;
+            }
+            self.fjack[jj] += 1.;
+            // apply the transformation to the remaining columns
+            // and update the norms.
+            let jp1 = j + 1;
+            if jp1 < self.nfree {
+                for k in jp1..self.nfree {
+                    let mut sum = 0.;
+                    ij = j + self.m * k;
+                    let mut jj = j + self.m * j;
+                    for _ in j..self.m {
+                        sum += self.fjack[jj] * self.fjack[ij];
+                        ij += 1;
+                        jj += 1;
+                    }
+                    let temp = sum / self.fjack[j + self.m * j];
+                    ij = j + self.m * k;
+                    jj = j + self.m * j;
+                    for _ in j..self.m {
+                        self.fjack[ij] -= temp * self.fjack[jj];
+                        ij += 1;
+                        jj += 1;
+                    }
+                    if self.wa1[k] != 0. {
+                        let temp = self.fjack[j + self.m * k] / self.wa1[k];
+                        let temp = (1. - temp.powi(2)).max(0.);
+                        self.wa1[k] *= temp.sqrt();
+                        let temp = self.wa1[k] / self.wa3[k];
+                        if 0.05 * temp * temp < f64::EPSILON {
+                            let start = jp1 + self.m * k;
+                            self.wa1[k] = self.fjack[start..start + self.m - j - 1].enorm();
+                            self.wa3[k] = self.wa1[k];
+                        }
+                    }
+                }
+            }
+            self.wa1[j] = -ajnorm;
+        }
+    }
 }
 
 pub fn mpfit<T: MPFitter>(
@@ -465,7 +549,7 @@ pub fn mpfit<T: MPFitter>(
         return MPResult::Error(MPError::DoF);
     }
     f.eval(fit.xall, &mut fit.fvec);
-    let fnorm = fit.enorm();
+    let fnorm = fit.fvec.enorm();
     let orig_norm = fnorm * fnorm;
     fit.xnew.copy_from_slice(fit.xall);
     fit.x = Vec::with_capacity(fit.nfree);
@@ -531,6 +615,89 @@ pub fn mpfit<T: MPFitter>(
             covar: vec![],
         },
     )
+}
+
+///    function enorm
+///
+///    given an n-vector x, this function calculates the
+///    euclidean norm of x.
+///
+///    the euclidean norm is computed by accumulating the sum of
+///    squares in three different sums. the sums of squares for the
+///    small and large components are scaled so that no overflows
+///    occur. non-destructive underflows are permitted. underflows
+///    and overflows do not occur in the computation of the unscaled
+///    sum of squares for the intermediate components.
+///    the definitions of small, intermediate and large components
+///    depend on two constants, rdwarf and rgiant. the main
+///    restrictions on these constants are that rdwarf**2 not
+///    underflow and rgiant**2 not overflow. the constants
+///    given here are suitable for every known computer.
+///    the function statement is
+///    double precision function enorm(n,x)
+///    where
+///
+///    n is a positive integer input variable.
+///
+///    x is an input array of length n.
+///
+///    subprograms called
+///
+///    fortran-supplied ... dabs,dsqrt
+///
+///    argonne national laboratory. minpack project. march 1980.
+///    burton s. garbow, kenneth e. hillstrom, jorge j. more
+trait ENorm {
+    fn enorm(&self) -> f64;
+}
+
+impl ENorm for [f64] {
+    fn enorm(&self) -> f64 {
+        let mut s1 = 0.;
+        let mut s2 = 0.;
+        let mut s3 = 0.;
+        let mut x1max = 0.;
+        let mut x3max = 0.;
+        let agiant = MP_RGIANT / self.len() as f64;
+        for val in self {
+            let xabs = val.abs();
+            if xabs > MP_RDWARF && xabs < agiant {
+                // sum for intermediate components.
+                s2 += xabs * xabs;
+            } else if xabs > MP_RDWARF {
+                // sum for large components.
+                if xabs > x1max {
+                    let temp = x1max / xabs;
+                    s1 = 1.0 + s1 * temp * temp;
+                    x1max = xabs;
+                } else {
+                    let temp = xabs / x1max;
+                    s1 += temp * temp;
+                }
+            } else if xabs > x3max {
+                // sum for small components.
+                let temp = x3max / xabs;
+                s3 = 1.0 + s3 * temp * temp;
+                x3max = xabs;
+            } else if xabs != 0.0 {
+                let temp = xabs / x3max;
+                s3 += temp * temp;
+            }
+        }
+        // calculation of norm.
+        if s1 != 0.0 {
+            x1max * (s1 + (s2 / x1max) / x1max).sqrt()
+        } else if s2 != 0.0 {
+            if s2 >= x3max {
+                s2 * (1.0 + (x3max / s2) * (x3max * s3))
+            } else {
+                x3max * ((s2 / x3max) + (x3max * s3))
+            }
+            .sqrt()
+        } else {
+            x3max * s3.sqrt()
+        }
+    }
 }
 
 #[cfg(test)]
