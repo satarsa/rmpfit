@@ -115,6 +115,8 @@ pub enum MPError {
 
 /// Potential success status
 pub enum MPSuccess {
+    /// Error
+    Error,
     /// Convergence in chi-square value
     Chi,
     /// Convergence in parameter value
@@ -202,6 +204,12 @@ struct MPFit<'a, F: MPFitter> {
     wa3: Vec<f64>,
     wa4: Vec<f64>,
     ipvt: Vec<usize>,
+    diag: Vec<f64>,
+    fnorm: f64,
+    fnorm1: f64,
+    xnorm: f64,
+    delta: f64,
+    info: MPSuccess,
 }
 
 impl<'a, F: MPFitter> MPFit<'a, F> {
@@ -236,6 +244,12 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 wa3: vec![0.; npar],
                 wa4: vec![0.; m],
                 ipvt: vec![0; npar],
+                diag: vec![0.; npar],
+                fnorm: -1.0,
+                fnorm1: -1.0,
+                xnorm: -1.0,
+                delta: 0.0,
+                info: MPSuccess::Error,
             })
         }
     }
@@ -549,8 +563,8 @@ pub fn mpfit<T: MPFitter>(
         return MPResult::Error(MPError::DoF);
     }
     f.eval(fit.xall, &mut fit.fvec);
-    let fnorm = fit.fvec.enorm();
-    let orig_norm = fnorm * fnorm;
+    fit.fnorm = fit.fvec.enorm();
+    let orig_norm = fit.fnorm * fit.fnorm;
     fit.xnew.copy_from_slice(fit.xall);
     fit.x = Vec::with_capacity(fit.nfree);
     for i in 0..fit.nfree {
@@ -558,7 +572,7 @@ pub fn mpfit<T: MPFitter>(
     }
     // Initialize Levenberg-Marquardt parameter and iteration counter
     let par = 0.0;
-    let iter = 1;
+    let mut iter = 1;
     fit.qtf = vec![0.; fit.nfree];
     fit.fjack = vec![0.; fit.m * fit.nfree];
     loop {
@@ -597,6 +611,90 @@ pub fn mpfit<T: MPFitter>(
         }
         // Compute the QR factorization of the jacobian
         fit.qrfac();
+        /*
+         *	 on the first iteration and if mode is 1, scale according
+         *	 to the norms of the columns of the initial jacobian.
+         */
+        if iter == 1 {
+            if !config.do_user_scale {
+                for j in 0..fit.nfree {
+                    fit.diag[fit.ifree[j]] = if fit.wa2[j] == 0. { 1. } else { fit.wa2[j] };
+                }
+            }
+            /*
+             *	 on the first iteration, calculate the norm of the scaled x
+             *	 and initialize the step bound delta.
+             */
+            for j in 0..fit.nfree {
+                fit.wa3[j] = fit.diag[fit.ifree[j]] * fit.x[j];
+            }
+            fit.xnorm = fit.wa3.enorm();
+            fit.delta = config.step_factor * fit.xnorm;
+            if fit.delta == 0. {
+                fit.delta = config.step_factor;
+            }
+        }
+        /*
+         *	 form (q transpose)*fvec and store the first n components in
+         *	 qtf.
+         */
+        fit.wa4.copy_from_slice(&fit.fvec);
+        let mut jj = 0;
+        for j in 0..fit.nfree {
+            let temp = fit.fjack[jj];
+            if temp != 0. {
+                let mut sum = 0.0;
+                let mut ij = jj;
+                for i in j..fit.m {
+                    sum += fit.fjack[ij] * fit.wa4[i];
+                    ij += 1;
+                }
+                let temp = -sum / temp;
+                ij = jj;
+                for i in j..fit.m {
+                    fit.wa4[i] += fit.fjack[ij] * temp;
+                    ij += 1;
+                }
+            }
+            fit.fjack[jj] = fit.wa1[j];
+            jj += fit.m + 1;
+            fit.qtf[j] = fit.wa4[j];
+        }
+        /* ( From this point on, only the square matrix, consisting of the
+        triangle of R, is needed.) */
+        if config.no_finite_check {
+            /* Check for overflow.  This should be a cheap test here since FJAC
+            has been reduced to a (small) square matrix, and the test is
+            O(N^2). */
+            for val in &fit.fjack {
+                if !val.is_finite() {
+                    return MPResult::Error(MPError::Nan);
+                }
+            }
+        }
+        /*
+         *	 compute the norm of the scaled gradient.
+         */
+        let mut gnorm: f64 = 0.;
+        if fit.fnorm != 0. {
+            let mut jj = 0;
+            for j in 0..fit.nfree {
+                let l = fit.ipvt[j];
+                if fit.wa2[l] != 0. {
+                    let mut sum = 0.;
+                    let mut ij = jj;
+                    for i in 0..=j {
+                        sum += fit.fjack[ij] * (fit.qtf[i] / fit.fnorm);
+                        ij += 1;
+                    }
+                    gnorm = gnorm.max((sum / fit.wa2[l]).abs());
+                }
+                jj += fit.m;
+            }
+        }
+        if gnorm <= config.gtol {
+            fit.info = MPSuccess::Dir;
+        }
         break;
     }
     MPResult::Success(
