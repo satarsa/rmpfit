@@ -68,7 +68,7 @@ impl ::std::default::Default for MPConfig {
             epsfcn: f64::EPSILON,
             step_factor: 100.0,
             covtol: 1e-14,
-            max_iter: 0,
+            max_iter: 200,
             max_fev: 0,
             n_print: true,
             do_user_scale: false,
@@ -97,6 +97,7 @@ pub enum MPError {
 }
 
 /// Potential success status
+#[derive(PartialEq)]
 pub enum MPSuccess {
     /// Error
     Error,
@@ -678,6 +679,25 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         }
         gnorm
     }
+
+    fn terminate(&self) -> MPResult {
+        MPResult::Success(
+            MPSuccess::Both,
+            MPStatus {
+                best_norm: 0.0,
+                orig_norm: 0.0,
+                n_iter: 0,
+                n_fev: 0,
+                n_par: 0,
+                n_free: 0,
+                n_pegged: 0,
+                n_func: 0,
+                resid: vec![],
+                xerror: vec![],
+                covar: vec![],
+            },
+        )
+    }
 }
 
 pub fn mpfit<T: MPFitter>(
@@ -710,24 +730,15 @@ pub fn mpfit<T: MPFitter>(
         if gnorm <= config.gtol {
             fit.info = MPSuccess::Dir;
         }
-        break;
+        if fit.info != MPSuccess::Error {
+            return fit.terminate();
+        }
+        if config.max_iter == 0 {
+            fit.info = MPSuccess::MaxIter;
+            return fit.terminate();
+        }
+        return fit.terminate();
     }
-    MPResult::Success(
-        MPSuccess::Both,
-        MPStatus {
-            best_norm: 0.0,
-            orig_norm: 0.0,
-            n_iter: 0,
-            n_fev: 0,
-            n_par: 0,
-            n_free: 0,
-            n_pegged: 0,
-            n_func: 0,
-            resid: vec![],
-            xerror: vec![],
-            covar: vec![],
-        },
-    )
 }
 
 ///    function enorm
