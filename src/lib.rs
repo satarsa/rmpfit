@@ -910,6 +910,208 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 self.par = f64::MIN_POSITIVE.max(0.001 * paru);
             }
             let temp = self.par.sqrt();
+            for j in 0..self.nfree {
+                self.wa3[j] = temp * self.diag[self.ifree[j]];
+            }
+            self.qrsolv();
+        }
+    }
+
+    /// subroutine qrsolv
+    ///
+    /// given an m by n matrix a, an n by n diagonal matrix d,
+    /// and an m-vector b, the problem is to determine an x which
+    /// solves the system
+    ///
+    ///	a*x = b ,	  d*x = 0 ,
+    ///
+    /// in the least squares sense.
+    ///
+    /// this subroutine completes the solution of the problem
+    /// if it is provided with the necessary information from the
+    /// qr factorization, with column pivoting, of a. that is, if
+    /// a*p = q*r, where p is a permutation matrix, q has orthogonal
+    /// columns, and r is an upper triangular matrix with diagonal
+    /// elements of nonincreasing magnitude, then qrsolv expects
+    /// the full upper triangle of r, the permutation matrix p,
+    /// and the first n components of (q transpose)*b. the system
+    /// a*x = b, d*x = 0, is then equivalent to
+    ///
+    ///		   t	   t
+    ///	r*z = q *b ,  p *d*p*z = 0 ,
+    ///
+    /// where x = p*z. if this system does not have full rank,
+    /// then a least squares solution is obtained. on output qrsolv
+    /// also provides an upper triangular matrix s such that
+    ///
+    ///	 t	 t		 t
+    ///	p *(a *a + d*d)*p = s *s .
+    ///
+    /// s is computed within qrsolv and may be of separate interest.
+    ///
+    /// the subroutine statement is
+    ///
+    ///	subroutine qrsolv(n,r,ldr,ipvt,diag,qtb,x,sdiag,wa)
+    ///
+    /// where
+    ///
+    ///	n is a positive integer input variable set to the order of r.
+    ///
+    ///	r is an n by n array. on input the full upper triangle
+    ///	  must contain the full upper triangle of the matrix r.
+    ///	  on output the full upper triangle is unaltered, and the
+    ///	  strict lower triangle contains the strict upper triangle
+    ///	  (transposed) of the upper triangular matrix s.
+    ///
+    ///	ldr is a positive integer input variable not less than n
+    ///	  which specifies the leading dimension of the array r.
+    ///
+    ///	ipvt is an integer input array of length n which defines the
+    ///	  permutation matrix p such that a*p = q*r. column j of p
+    ///	  is column ipvt(j) of the identity matrix.
+    ///
+    ///	diag is an input array of length n which must contain the
+    ///	  diagonal elements of the matrix d.
+    ///
+    ///	qtb is an input array of length n which must contain the first
+    ///	  n elements of the vector (q transpose)*b.
+    ///
+    ///	x is an output array of length n which contains the least
+    ///	  squares solution of the system a*x = b, d*x = 0.
+    ///
+    ///	sdiag is an output array of length n which contains the
+    ///	  diagonal elements of the upper triangular matrix s.
+    ///
+    ///	wa is a work array of length n.
+    ///
+    /// subprograms called
+    ///
+    ///	fortran-supplied ... dabs,dsqrt
+    ///
+    /// argonne national laboratory. minpack project. march 1980.
+    /// burton s. garbow, kenneth e. hillstrom, jorge j. more
+    fn qrsolv(&mut self) {
+        /*
+         *     copy r and (q transpose)*b to preserve input and initialize s.
+         *     in particular, save the diagonal elements of r in x.
+         */
+        let mut kk = 0;
+        for j in 0..self.nfree {
+            let mut ij = kk;
+            let mut ik = kk;
+            for _ in j..self.nfree {
+                self.fjack[ij] = self.fjack[ik];
+                ij += 1;
+                ik += self.m;
+            }
+            self.wa1[j] = self.fjack[kk];
+            self.wa4[j] = self.qtf[j];
+            kk += self.m + 1;
+        }
+        /*
+         *     eliminate the diagonal matrix d using a givens rotation.
+         */
+        for j in 0..self.nfree {
+            /*
+             *	 prepare the row of d to be eliminated, locating the
+             *	 diagonal element using p from the qr factorization.
+             */
+            let l = self.ipvt[j];
+            if self.wa3[l] != 0. {
+                for k in j..self.nfree {
+                    self.wa2[k] = 0.;
+                }
+                self.wa2[j] = self.wa3[l];
+                /*
+                 *	 the transformations to eliminate the row of d
+                 *	 modify only a single element of (q transpose)*b
+                 *	 beyond the first n, which is initially zero.
+                 */
+                let mut qtbpj = 0.;
+                for k in j..self.nfree {
+                    /*
+                     *	    determine a givens rotation which eliminates the
+                     *	    appropriate element in the current row of d.
+                     */
+                    if self.wa2[k] == 0. {
+                        continue;
+                    }
+                    let kk = k + self.m * k;
+                    let (sinx, cosx) = if self.fjack[kk].abs() < self.wa2[k].abs() {
+                        let cotan = self.fjack[kk] / self.wa2[k];
+                        let sinx = 0.5 / (0.25 + 0.25 * cotan * cotan).sqrt();
+                        let cosx = sinx * cotan;
+                        (sinx, cosx)
+                    } else {
+                        let tanx = self.wa2[k] / self.fjack[kk];
+                        let cosx = 0.5 / (0.25 + 0.25 * tanx * tanx).sqrt();
+                        let sinx = cosx * tanx;
+                        (sinx, cosx)
+                    };
+                    /*
+                     *	    compute the modified diagonal element of r and
+                     *	    the modified element of ((q transpose)*b,0).
+                     */
+                    self.fjack[kk] = cosx * self.fjack[kk] + sinx * self.wa2[k];
+                    let temp = cosx * self.wa4[k] + sinx * qtbpj;
+                    qtbpj = -sinx * self.wa4[k] + cosx * qtbpj;
+                    self.wa4[k] = temp;
+                    /*
+                     *	    accumulate the tranformation in the row of s.
+                     */
+                    let kp1 = k + 1;
+                    if self.nfree > kp1 {
+                        let mut ik = kk + 1;
+                        for i in kp1..self.nfree {
+                            let temp = cosx * self.fjack[ik] + sinx * self.wa2[i];
+                            self.wa2[i] = -sinx * self.fjack[ik] + cosx * self.wa2[i];
+                            self.fjack[ik] = temp;
+                            ik += 1;
+                        }
+                    }
+                }
+            }
+            /*
+             *	 store the diagonal element of s and restore
+             *	 the corresponding diagonal element of r.
+             */
+            let kk = j + self.m * j;
+            self.wa2[j] = self.fjack[kk];
+            self.fjack[kk] = self.wa1[j];
+        }
+        /*
+         *     solve the triangular system for z. if the system is
+         *     singular, then obtain a least squares solution.
+         */
+        let mut nsing = self.nfree;
+        for j in 0..self.nfree {
+            if self.wa2[j] == 0. && nsing == self.nfree {
+                nsing = j;
+            }
+            if nsing < self.nfree {
+                self.wa4[j] = 0.;
+            }
+        }
+        if nsing > 0 {
+            for k in 0..nsing {
+                let j = nsing - k - 1;
+                let mut sum = 0.;
+                let jp1 = j + 1;
+                if nsing > jp1 {
+                    let mut ij = jp1 + self.m * j;
+                    for i in jp1..nsing {
+                        sum += self.fjack[ij] * self.wa4[i];
+                        ij += 1;
+                    }
+                }
+                self.wa4[j] = (self.wa4[j] - sum) / self.wa2[j];
+            }
+        }
+        /*
+         *     permute the components of z back to components of x.
+         */
+        for j in 0..self.nfree {
+            self.wa1[self.ipvt[j]] = self.wa4[j];
         }
     }
 }
