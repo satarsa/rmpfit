@@ -841,8 +841,8 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         for j in 0..self.nfree {
             self.wa4[j] = self.diag[self.ifree[j]] * self.wa1[j];
         }
-        let dxnorm = self.wa4[0..self.nfree].enorm();
-        let fp = dxnorm - self.delta;
+        let mut dxnorm = self.wa4[0..self.nfree].enorm();
+        let mut fp = dxnorm - self.delta;
         if fp <= 0.1 * self.delta {
             self.par = 0.;
             return;
@@ -854,10 +854,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
          */
         let mut parl = 0.;
         if nsing >= self.nfree {
-            for j in 0..self.nfree {
-                let l = self.ipvt[j];
-                self.wa3[j] = self.diag[self.ifree[l]] * (self.wa4[l] / dxnorm);
-            }
+            self.newton_correction(dxnorm);
             let mut jj = 0;
             for j in 0..self.nfree {
                 let mut sum = 0.;
@@ -914,6 +911,59 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 self.wa3[j] = temp * self.diag[self.ifree[j]];
             }
             self.qrsolv();
+            for j in 0..self.nfree {
+                self.wa4[j] = self.diag[self.ifree[j]] * self.wa1[j];
+            }
+            dxnorm = self.wa4[0..self.nfree].enorm();
+            let temp = fp;
+            fp = dxnorm - self.delta;
+            /*
+             *	 if the function is small enough, accept the current value
+             *	 of par. also test for the exceptional cases where parl
+             *	 is zero or the number of iterations has reached 10.
+             */
+            if fp.abs() <= 0.1 * self.delta || (parl == 0. && fp <= temp && temp < 0.) || iter >= 10
+            {
+                return;
+            }
+            self.newton_correction(dxnorm);
+            jj = 0;
+            for j in 0..self.nfree {
+                self.wa3[j] = self.wa3[j] / self.wa2[j];
+                let temp = self.wa3[j];
+                let jp1 = j + 1;
+                if jp1 < self.nfree {
+                    let mut ij = jp1 + jj;
+                    for i in jp1..self.nfree {
+                        self.wa3[i] -= self.fjack[ij] * temp;
+                        ij += 1;
+                    }
+                }
+                jj += self.m;
+            }
+            let temp = self.wa3[0..self.nfree].enorm();
+            let parc = ((fp / self.delta) / temp) / temp;
+            /*
+             *	 depending on the sign of the function, update parl or paru.
+             */
+            if fp > 0.0 {
+                parl = parl.max(self.par);
+            }
+            if fp < 0.0 {
+                paru = paru.min(self.par);
+            }
+            /*
+             *	 compute an improved estimate for par.
+             */
+            self.par = parl.max(self.par + parc);
+        }
+    }
+
+    ///	compute the newton correction.
+    fn newton_correction(&mut self, dxnorm: f64) {
+        for j in 0..self.nfree {
+            let l = self.ipvt[j];
+            self.wa3[j] = self.diag[self.ifree[l]] * (self.wa4[l] / dxnorm);
         }
     }
 
