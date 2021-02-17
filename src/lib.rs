@@ -539,6 +539,20 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         }
         MPError::NoError
     }
+
+    // Initialize Levenberg-Marquardt parameter and iteration counter
+    fn init_lm(&mut self) {
+        self.f.eval(self.xall, &mut self.fvec);
+        self.fnorm = self.fvec.enorm();
+        self.orig_norm = self.fnorm * self.fnorm;
+        self.xnew.copy_from_slice(self.xall);
+        self.x = Vec::with_capacity(self.nfree);
+        for i in 0..self.nfree {
+            self.x.push(self.xall[self.ifree[i]]);
+        }
+        self.qtf = vec![0.; self.nfree];
+        self.fjack = vec![0.; self.m * self.nfree];
+    }
 }
 
 pub fn mpfit<T: MPFitter>(
@@ -556,17 +570,7 @@ pub fn mpfit<T: MPFitter>(
         MPError::NoError => (),
         _ => return MPResult::Error(params_error),
     }
-    f.eval(fit.xall, &mut fit.fvec);
-    fit.fnorm = fit.fvec.enorm();
-    fit.orig_norm = fit.fnorm * fit.fnorm;
-    fit.xnew.copy_from_slice(fit.xall);
-    fit.x = Vec::with_capacity(fit.nfree);
-    for i in 0..fit.nfree {
-        fit.x.push(fit.xall[fit.ifree[i]]);
-    }
-    // Initialize Levenberg-Marquardt parameter and iteration counter
-    fit.qtf = vec![0.; fit.nfree];
-    fit.fjack = vec![0.; fit.m * fit.nfree];
+    fit.init_lm();
     loop {
         for i in 0..fit.nfree {
             fit.xnew[fit.ifree[i]] = fit.x[i];
