@@ -90,6 +90,8 @@ pub enum MPError {
     Bounds,
     /// Not enough degrees of freedom
     DoF,
+    /// Error during evaluation by user
+    Eval,
 }
 
 /// Potential success status
@@ -143,7 +145,7 @@ pub struct MPStatus {
 }
 
 pub trait MPFitter {
-    fn eval(&self, params: &[f64], deviates: &mut [f64]);
+    fn eval(&self, params: &[f64], deviates: &mut [f64]) -> MPResult<()>;
 
     fn number_of_points(&self) -> usize;
 }
@@ -308,7 +310,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
     ///     argonne national laboratory. minpack project. march 1980.
     ///     burton s. garbow, kenneth e. hillstrom, jorge j. more
     ///
-    fn fdjac2(&mut self) {
+    fn fdjac2(&mut self) -> MPResult<()> {
         // Calculate the Jacobian matrix
         let eps = self.cfg.epsfcn.max(f64::EPSILON).sqrt();
         // TODO: probably sides and analytical derivatives should be implemented at some point
@@ -334,7 +336,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 h = -h;
             }
             self.x[self.ifree[j]] = temp + h;
-            self.f.eval(&self.x, &mut self.wa4);
+            self.f.eval(&self.x, &mut self.wa4)?;
             self.nfev += 1;
             self.x[self.ifree[j]] = temp;
             for i in 0..self.m {
@@ -342,6 +344,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 ij += 1;
             }
         }
+        Ok(())
     }
 
     ///     subroutine qrfac
@@ -544,8 +547,8 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
     }
 
     // Initialize Levenberg-Marquardt parameter and iteration counter
-    fn init_lm(&mut self) {
-        self.f.eval(self.xall, &mut self.fvec);
+    fn init_lm(&mut self) -> MPResult<()> {
+        self.f.eval(self.xall, &mut self.fvec)?;
         self.fnorm = self.fvec.enorm();
         self.orig_norm = self.fnorm * self.fnorm;
         self.xnew.copy_from_slice(self.xall);
@@ -555,6 +558,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         }
         self.qtf = vec![0.; self.nfree];
         self.fjac = vec![0.; self.m * self.nfree];
+        Ok(())
     }
 
     fn check_limits(&mut self) {
@@ -1340,7 +1344,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         }
     }
 
-    fn iterate(&mut self, gnorm: f64) -> MPDone {
+    fn iterate(&mut self, gnorm: f64) -> MPResult<MPDone> {
         for j in 0..self.nfree {
             self.wa1[j] = -self.wa1[j];
         }
@@ -1410,7 +1414,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         for i in 0..self.nfree {
             self.xnew[self.ifree[i]] = self.wa2[i];
         }
-        self.f.eval(&self.xnew, &mut self.wa4);
+        self.f.eval(&self.xnew, &mut self.wa4)?;
         self.nfev += 1;
         // TODO: user function may return an error which we have to handle here
         self.fnorm1 = self.wa4[0..self.m].enorm();
@@ -1509,7 +1513,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             self.info = MPSuccess::Both;
         }
         if self.info != MPSuccess::NotDone {
-            return MPDone::Exit;
+            return Ok(MPDone::Exit);
         }
         /*
          *	    tests for termination and stringent tolerances.
@@ -1532,12 +1536,12 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             self.info = MPSuccess::Gtol;
         }
         if self.info != MPSuccess::NotDone {
-            return MPDone::Exit;
+            return Ok(MPDone::Exit);
         }
         if ratio < 1e-4 {
-            MPDone::Inner
+            Ok(MPDone::Inner)
         } else {
-            MPDone::Outer
+            Ok(MPDone::Outer)
         }
     }
 
@@ -1571,10 +1575,10 @@ pub fn mpfit<T: MPFitter>(
     let mut fit = MPFit::new(&f, xall, config)?;
     fit.check_config()?;
     fit.parse_params(params)?;
-    fit.init_lm();
+    fit.init_lm()?;
     loop {
         fit.fill_xnew();
-        fit.fdjac2();
+        fit.fdjac2()?;
         fit.check_limits();
         fit.qrfac();
         fit.scale();
@@ -1596,7 +1600,8 @@ pub fn mpfit<T: MPFitter>(
         fit.rescale();
         loop {
             fit.lmpar();
-            match fit.iterate(gnorm) {
+            let res = fit.iterate(gnorm)?;
+            match res {
                 MPDone::Exit => return fit.terminate(params),
                 MPDone::Inner => continue,
                 MPDone::Outer => break,
@@ -1701,6 +1706,7 @@ impl fmt::Display for MPError {
                 MPError::InitBounds => "initial values inconsistent with constraints",
                 MPError::Bounds => "initial constraints inconsistent",
                 MPError::DoF => "not enough degrees of freedom",
+                MPError::Eval => "error during user evaluation",
             }
         )
     }
@@ -1728,7 +1734,7 @@ impl fmt::Display for MPSuccess {
 
 #[cfg(test)]
 mod tests {
-    use crate::{mpfit, MPFitter, MPSuccess};
+    use crate::{mpfit, MPFitter, MPResult, MPSuccess};
     use assert_approx_eq::assert_approx_eq;
 
     #[test]
@@ -1740,7 +1746,7 @@ mod tests {
         };
 
         impl MPFitter for Linear {
-            fn eval(&self, params: &[f64], deviates: &mut [f64]) {
+            fn eval(&self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
                 for (((d, x), y), ye) in deviates
                     .iter_mut()
                     .zip(self.x.iter())
@@ -1750,6 +1756,7 @@ mod tests {
                     let f = params[0] + params[1] * *x;
                     *d = (*y - f) / *ye;
                 }
+                Ok(())
             }
 
             fn number_of_points(&self) -> usize {
