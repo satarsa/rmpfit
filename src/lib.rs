@@ -200,7 +200,8 @@ struct MPFit<'a, F: MPFitter> {
 }
 
 impl<'a, F: MPFitter> MPFit<'a, F> {
-    fn new(m: usize, xall: &'a mut [f64], f: &'a F, cfg: &'a MPConfig) -> Option<MPFit<'a, F>> {
+    fn new(f: &'a F, xall: &'a mut [f64], cfg: &'a MPConfig) -> Option<MPFit<'a, F>> {
+        let m = f.number_of_points();
         let npar = xall.len();
         if m == 0 {
             None
@@ -1379,7 +1380,7 @@ pub fn mpfit<T: MPFitter>(
     params: Option<&[MPPar]>,
     config: &MPConfig,
 ) -> MPResult {
-    let mut fit = match MPFit::new(f.number_of_points(), xall, &f, config) {
+    let mut fit = match MPFit::new(&f, xall, config) {
         None => return MPResult::Error(MPError::Empty),
         Some(v) => v,
     };
