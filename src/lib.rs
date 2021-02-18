@@ -1794,13 +1794,14 @@ mod tests {
         let res = mpfit(l, &mut init, None, &Default::default());
         match res {
             Ok(status) => {
-                println!("Linear fit status: {}", status.success);
                 assert_eq!(status.success, MPSuccess::Chi);
-                assert_approx_eq!(init[0], 3.20996572);
-                assert_approx_eq!(init[1], 1.77095420);
                 assert_eq!(status.n_iter, 3);
                 assert_eq!(status.n_fev, 7);
                 assert_approx_eq!(status.best_norm, 2.75628498);
+                assert_approx_eq!(init[0], 3.20996572);
+                assert_approx_eq!(init[1], 1.77095420);
+                assert_approx_eq!(status.xerror[0], 0.02221018);
+                assert_approx_eq!(status.xerror[1], 0.01893756);
             }
             Err(err) => {
                 panic!("Error in Linear fit: {}", err);
