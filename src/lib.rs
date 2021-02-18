@@ -1808,4 +1808,79 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn quad() {
+        struct Quad {
+            x: Vec<f64>,
+            y: Vec<f64>,
+            ye: Vec<f64>,
+        };
+
+        impl MPFitter for Quad {
+            fn eval(&self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
+                for (((d, x), y), ye) in deviates
+                    .iter_mut()
+                    .zip(self.x.iter())
+                    .zip(self.y.iter())
+                    .zip(self.ye.iter())
+                {
+                    let x = *x;
+                    let f = params[0] + params[1] * x + params[2] * x * x;
+                    *d = (*y - f) / *ye;
+                }
+                Ok(())
+            }
+
+            fn number_of_points(&self) -> usize {
+                self.x.len()
+            }
+        }
+        let l = Quad {
+            x: vec![
+                -1.7237128E+00,
+                1.8712276E+00,
+                -9.6608055E-01,
+                -2.8394297E-01,
+                1.3416969E+00,
+                1.3757038E+00,
+                -1.3703436E+00,
+                4.2581975E-02,
+                -1.4970151E-01,
+                8.2065094E-01,
+            ],
+            y: vec![
+                2.3095947E+01,
+                2.6449392E+01,
+                1.0204468E+01,
+                5.40507,
+                1.5787588E+01,
+                1.6520903E+01,
+                1.5971818E+01,
+                4.7668524E+00,
+                4.9337711E+00,
+                8.7348375E+00,
+            ],
+            ye: vec![0.2; 10],
+        };
+        let mut init = [1., 1., 1.];
+        let res = mpfit(l, &mut init, None, &Default::default());
+        match res {
+            Ok(status) => {
+                assert_eq!(status.success, MPSuccess::Chi);
+                assert_eq!(status.n_iter, 3);
+                assert_eq!(status.n_fev, 9);
+                assert_approx_eq!(status.best_norm, 5.67932273);
+                assert_approx_eq!(init[0], 4.70382909);
+                assert_approx_eq!(init[1], 0.06258629);
+                assert_approx_eq!(init[2], 6.16308723);
+                assert_approx_eq!(status.xerror[0], 0.09751164);
+                assert_approx_eq!(status.xerror[1], 0.05480195);
+                assert_approx_eq!(status.xerror[2], 0.05443275);
+            }
+            Err(err) => {
+                panic!("Error in Quad fit: {}", err);
+            }
+        }
+    }
 }
