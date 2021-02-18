@@ -1,3 +1,6 @@
+use std::fmt;
+use std::fmt::Formatter;
+
 /// Definition of a parameter constraint structure
 pub struct MPPar {
     pub fixed: bool,
@@ -9,20 +12,6 @@ pub struct MPPar {
     pub step: f64,
     /// Relative step size for finite difference
     pub rel_step: f64,
-}
-
-impl ::std::default::Default for MPPar {
-    fn default() -> Self {
-        MPPar {
-            fixed: false,
-            limited_low: false,
-            limited_up: false,
-            limit_low: 0.0,
-            limit_up: 0.0,
-            step: 0.0,
-            rel_step: 0.0,
-        }
-    }
 }
 
 /// Definition of MPFIT configuration structure
@@ -79,7 +68,7 @@ impl ::std::default::Default for MPConfig {
 
 /// MP Fit errors
 pub enum MPError {
-    NoError,
+    Unknown,
     /// General input parameter error
     Input,
     /// User function produced non-finite values
@@ -121,12 +110,13 @@ pub enum MPSuccess {
 
 // MP Fit Result
 pub enum MPResult {
-    Success(MPSuccess, MPStatus),
+    Success(MPStatus),
     Error(MPError),
 }
 
 /// Definition of results structure, for when fit completes
 pub struct MPStatus {
+    pub success: MPSuccess,
     /// Final chi^2
     pub best_norm: f64,
     /// Starting value of chi^2
@@ -543,7 +533,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         if self.m < self.nfree {
             return MPError::DoF;
         }
-        MPError::NoError
+        MPError::Unknown
     }
 
     // Initialize Levenberg-Marquardt parameter and iteration counter
@@ -681,26 +671,200 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         gnorm
     }
 
-    fn terminate(&mut self) -> MPResult {
+    fn terminate(mut self, params: Option<&[MPPar]>) -> MPResult {
         for i in 0..self.nfree {
             self.xall[self.ifree[i]] = self.x[i];
         }
-        MPResult::Success(
-            MPSuccess::Both,
-            MPStatus {
-                best_norm: 0.0,
-                orig_norm: 0.0,
-                n_iter: 0,
-                n_fev: 0,
-                n_par: 0,
-                n_free: 0,
-                n_pegged: 0,
-                n_func: 0,
-                resid: vec![],
-                xerror: vec![],
-                covar: vec![],
-            },
-        )
+        /* Compute number of pegged parameters */
+        let n_pegged = match params {
+            None => 0,
+            Some(params) => {
+                let mut n_pegged = 0;
+                for (i, p) in params.iter().enumerate() {
+                    if p.limited_low && p.limit_low == self.xall[i]
+                        || p.limited_up && p.limit_up == self.xall[i]
+                    {
+                        n_pegged += 1;
+                    }
+                }
+                n_pegged
+            }
+        };
+        /* Compute and return the covariance matrix and/or parameter errors */
+        self = self.covar();
+        let mut covar = vec![0.; self.npar * self.npar];
+        for j in 0..self.npar {
+            let k = self.ifree[j] * self.npar;
+            let l = j * self.m;
+            for i in 0..self.npar {
+                covar[k + self.ifree[i]] = self.fjac[l + i]
+            }
+        }
+        let mut xerror = vec![0.; self.npar];
+        for j in 0..self.nfree {
+            let cc = self.fjac[j * self.m + j];
+            if cc > 0. {
+                xerror[self.ifree[j]] = cc.sqrt();
+            }
+        }
+        let best_norm = self.fnorm.max(self.fnorm1);
+        MPResult::Success(MPStatus {
+            success: self.info,
+            best_norm: best_norm * best_norm,
+            orig_norm: self.orig_norm,
+            n_iter: self.iter,
+            n_fev: self.nfev,
+            n_par: self.npar,
+            n_free: self.nfree,
+            n_pegged,
+            n_func: self.m,
+            resid: self.fvec,
+            xerror,
+            covar,
+        })
+    }
+
+    ///     subroutine covar
+    ///
+    ///    given an m by n matrix a, the problem is to determine
+    ///    the covariance matrix corresponding to a, defined as
+    ///
+    ///                   t
+    ///          inverse(a *a) .
+    ///
+    ///    this subroutine completes the solution of the problem
+    ///    if it is provided with the necessary information from the
+    ///    qr factorization, with column pivoting, of a. that is, if
+    ///    a*p = q*r, where p is a permutation matrix, q has orthogonal
+    ///    columns, and r is an upper triangular matrix with diagonal
+    ///    elements of nonincreasing magnitude, then covar expects
+    ///    the full upper triangle of r and the permutation matrix p.
+    ///    the covariance matrix is then computed as
+    ///
+    ///                     t     t
+    ///          p*inverse(r *r)*p  .
+    ///
+    ///    if a is nearly rank deficient, it may be desirable to compute
+    ///    the covariance matrix corresponding to the linearly independent
+    ///    columns of a. to define the numerical rank of a, covar uses
+    ///    the tolerance tol. if l is the largest integer such that
+    ///
+    ///          abs(r(l,l)) .gt. tol*abs(r(1,1)) ,
+    ///
+    ///    then covar computes the covariance matrix corresponding to
+    ///    the first l columns of r. for k greater than l, column
+    ///    and row ipvt(k) of the covariance matrix are set to zero.
+    ///
+    ///    the subroutine statement is
+    ///
+    ///      subroutine covar(n,r,ldr,ipvt,tol,wa)
+    ///
+    ///    where
+    ///
+    ///      n is a positive integer input variable set to the order of r.
+    ///
+    ///      r is an n by n array. on input the full upper triangle must
+    ///        contain the full upper triangle of the matrix r. on output
+    ///        r contains the square symmetric covariance matrix.
+    ///
+    ///      ldr is a positive integer input variable not less than n
+    ///        which specifies the leading dimension of the array r.
+    ///
+    ///      ipvt is an integer input array of length n which defines the
+    ///        permutation matrix p such that a*p = q*r. column j of p
+    ///        is column ipvt(j) of the identity matrix.
+    ///
+    ///      tol is a nonnegative input variable used to define the
+    ///        numerical rank of a in the manner described above.
+    ///
+    ///      wa is a work array of length n.
+    ///
+    ///    subprograms called
+    ///
+    ///      fortran-supplied ... dabs
+    ///
+    ///    argonne national laboratory. minpack project. august 1980.
+    ///    burton s. garbow, kenneth e. hillstrom, jorge j. more
+    fn covar(mut self) -> Self {
+        /*
+         * form the inverse of r in the full upper triangle of r.
+         */
+        let tolr = self.cfg.covtol * self.fjac[0].abs();
+        let mut l: isize = -1;
+        for k in 0..self.nfree {
+            let k0 = k * self.m;
+            let kk = k0 + k;
+            if self.fjac[kk].abs() <= tolr {
+                break;
+            }
+            self.fjac[kk] = 1.0 / self.fjac[kk];
+            for j in 0..k {
+                let kj = k0 + j;
+                let temp = self.fjac[kk] * self.fjac[kj];
+                self.fjac[kj] = 0.;
+                let j0 = j * self.m;
+                for i in 0..=j {
+                    self.fjac[k0 + i] += -temp * self.fjac[j0 + i];
+                }
+            }
+            l = k as isize;
+        }
+        /*
+         * Form the full upper triangle of the inverse of (r transpose)*r
+         * in the full upper triangle of r
+         */
+        if l >= 0 {
+            let l = l as usize;
+            for k in 0..=l {
+                let k0 = k * self.m;
+                for j in 0..k {
+                    let temp = self.fjac[k0 + j];
+                    let j0 = j * self.m;
+                    for i in 0..=j {
+                        self.fjac[j0 + i] += temp * self.fjac[k0 + i];
+                    }
+                }
+                let temp = self.fjac[k0 + k];
+                for i in 0..=k {
+                    self.fjac[k0 + i] *= temp;
+                }
+            }
+        }
+        /*
+         * For the full lower triangle of the covariance matrix
+         * in the strict lower triangle or and in wa
+         */
+        for j in 0..self.nfree {
+            let jj = self.ipvt[j];
+            let sing = j as isize > l;
+            let j0 = j * self.m;
+            let jj0 = jj * self.m;
+            for i in 0..=j {
+                let ji = j0 + i;
+                if sing {
+                    self.fjac[ji] = 0.;
+                }
+                let ii = self.ipvt[i];
+                if ii > jj {
+                    self.fjac[jj0 + ii] = self.fjac[ji];
+                }
+                if ii < jj {
+                    self.fjac[ii * self.m + jj] = self.fjac[ji];
+                }
+            }
+            self.wa2[jj] = self.fjac[j0 + j];
+        }
+        /*
+         * Symmetrize the covariance matrix in r
+         */
+        for j in 0..self.nfree {
+            let j0 = j * self.m;
+            for i in 0..j {
+                self.fjac[j0 + i] = self.fjac[i * self.m + j];
+            }
+            self.fjac[j0 + j] = self.wa2[j];
+        }
+        self
     }
 
     fn rescale(&mut self) {
@@ -1389,7 +1553,7 @@ pub fn mpfit<T: MPFitter>(
     };
     let params_error = fit.parse_params(params);
     match &params_error {
-        MPError::NoError => (),
+        MPError::Unknown => (),
         _ => return MPResult::Error(params_error),
     }
     fit.init_lm();
@@ -1408,17 +1572,17 @@ pub fn mpfit<T: MPFitter>(
             fit.info = MPSuccess::Dir;
         }
         if fit.info != MPSuccess::NotDone {
-            return fit.terminate();
+            return fit.terminate(params);
         }
         if config.max_iter == 0 {
             fit.info = MPSuccess::MaxIter;
-            return fit.terminate();
+            return fit.terminate(params);
         }
         fit.rescale();
         loop {
             fit.lmpar();
             match fit.iterate(gnorm) {
-                MPDone::Exit => return fit.terminate(),
+                MPDone::Exit => return fit.terminate(params),
                 MPDone::Inner => continue,
                 MPDone::Outer => break,
             }
@@ -1509,9 +1673,28 @@ impl ENorm for [f64] {
     }
 }
 
+impl fmt::Display for MPError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                MPError::Unknown => "error unknown",
+                MPError::Input => "general input parameter error",
+                MPError::Nan => "user function produced non-finite values",
+                MPError::Empty => "no user data points were supplied",
+                MPError::NoFree => "no free parameters",
+                MPError::InitBounds => "initial values inconsistent with constraints",
+                MPError::Bounds => "initial constraints inconsistent",
+                MPError::DoF => "not enough degrees of freedom",
+            }
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::{mpfit, MPFitter};
+    use crate::{mpfit, MPFitter, MPResult};
     use assert_approx_eq::assert_approx_eq;
 
     #[test]
@@ -1567,8 +1750,18 @@ mod tests {
             ye: vec![0.07; 10],
         };
         let mut init = [1., 1.];
-        let _ = mpfit(l, &mut init, None, &Default::default());
-        assert_approx_eq!(init[0], 3.20996572);
-        assert_approx_eq!(init[1], 1.77095420);
+        let res = mpfit(l, &mut init, None, &Default::default());
+        match res {
+            MPResult::Success(status) => {
+                assert_approx_eq!(init[0], 3.20996572);
+                assert_approx_eq!(init[1], 1.77095420);
+                assert_eq!(status.n_iter, 3);
+                assert_eq!(status.n_fev, 7);
+                assert_approx_eq!(status.best_norm, 2.75628498);
+            }
+            MPResult::Error(err) => {
+                panic!("Error in Linear fit: {}", err);
+            }
+        }
     }
 }
