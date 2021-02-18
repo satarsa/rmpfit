@@ -1,6 +1,8 @@
 use std::fmt;
 use std::fmt::Formatter;
 
+pub type MPResult = Result<MPStatus, MPError>;
+
 /// Definition of a parameter constraint structure
 pub struct MPPar {
     pub fixed: bool,
@@ -106,12 +108,6 @@ pub enum MPSuccess {
     Xtol,
     /// gtol is too small; no further improvement
     Gtol,
-}
-
-// MP Fit Result
-pub enum MPResult {
-    Success(MPStatus),
-    Error(MPError),
 }
 
 /// Definition of results structure, for when fit completes
@@ -708,7 +704,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             }
         }
         let best_norm = self.fnorm.max(self.fnorm1);
-        MPResult::Success(MPStatus {
+        Ok(MPStatus {
             success: self.info,
             best_norm: best_norm * best_norm,
             orig_norm: self.orig_norm,
@@ -1548,13 +1544,13 @@ pub fn mpfit<T: MPFitter>(
     config: &MPConfig,
 ) -> MPResult {
     let mut fit = match MPFit::new(&f, xall, config) {
-        None => return MPResult::Error(MPError::Empty),
+        None => return Err(MPError::Empty),
         Some(v) => v,
     };
     let params_error = fit.parse_params(params);
     match &params_error {
         MPError::Unknown => (),
-        _ => return MPResult::Error(params_error),
+        _ => return Err(params_error),
     }
     fit.init_lm();
     loop {
@@ -1565,7 +1561,7 @@ pub fn mpfit<T: MPFitter>(
         fit.scale();
         fit.transpose();
         if !fit.check_is_finite() {
-            return MPResult::Error(MPError::Nan);
+            return Err(MPError::Nan);
         }
         let gnorm = fit.gnorm();
         if gnorm <= config.gtol {
@@ -1694,7 +1690,7 @@ impl fmt::Display for MPError {
 
 #[cfg(test)]
 mod tests {
-    use crate::{mpfit, MPFitter, MPResult};
+    use crate::{mpfit, MPFitter};
     use assert_approx_eq::assert_approx_eq;
 
     #[test]
@@ -1752,14 +1748,14 @@ mod tests {
         let mut init = [1., 1.];
         let res = mpfit(l, &mut init, None, &Default::default());
         match res {
-            MPResult::Success(status) => {
+            Ok(status) => {
                 assert_approx_eq!(init[0], 3.20996572);
                 assert_approx_eq!(init[1], 1.77095420);
                 assert_eq!(status.n_iter, 3);
                 assert_eq!(status.n_fev, 7);
                 assert_approx_eq!(status.best_norm, 2.75628498);
             }
-            MPResult::Error(err) => {
+            Err(err) => {
                 panic!("Error in Linear fit: {}", err);
             }
         }
