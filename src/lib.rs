@@ -99,8 +99,8 @@ pub enum MPError {
 /// Potential success status
 #[derive(PartialEq)]
 pub enum MPSuccess {
-    /// Error
-    Error,
+    /// Not finished iterations
+    NotDone,
     /// Convergence in chi-square value
     Chi,
     /// Convergence in parameter value
@@ -173,7 +173,7 @@ struct MPFit<'a, F: MPFitter> {
     x: Vec<f64>,
     xall: &'a mut [f64],
     qtf: Vec<f64>,
-    fjack: Vec<f64>,
+    fjac: Vec<f64>,
     step: Vec<f64>,
     dstep: Vec<f64>,
     qllim: Vec<bool>,
@@ -216,7 +216,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 x: vec![],
                 xall,
                 qtf: vec![],
-                fjack: vec![],
+                fjac: vec![],
                 step: vec![],
                 dstep: vec![],
                 qllim: vec![],
@@ -235,7 +235,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 fnorm1: -1.0,
                 xnorm: -1.0,
                 delta: 0.0,
-                info: MPSuccess::Error,
+                info: MPSuccess::NotDone,
                 orig_norm: 0.0,
                 par: 0.0,
                 iter: 1,
@@ -346,7 +346,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             self.nfev += 1;
             self.x[self.ifree[j]] = temp;
             for i in 0..self.m {
-                self.fjack[ij] = (self.wa4[i] - self.fvec[i]) / h;
+                self.fjac[ij] = (self.wa4[i] - self.fvec[i]) / h;
                 ij += 1;
             }
         }
@@ -428,7 +428,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         // compute the initial column norms and initialize several arrays.
         let mut ij = 0;
         for j in 0..self.nfree {
-            self.wa2[j] = self.fjack[ij..ij + self.m].enorm();
+            self.wa2[j] = self.fjac[ij..ij + self.m].enorm();
             self.wa1[j] = self.wa2[j];
             self.wa3[j] = self.wa1[j];
             self.ipvt[j] = j;
@@ -447,7 +447,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 let mut ij = self.m * j;
                 let mut jj = self.m * kmax;
                 for _ in 0..self.m {
-                    self.fjack.swap(jj, ij);
+                    self.fjac.swap(jj, ij);
                     ij += 1;
                     jj += 1;
                 }
@@ -456,20 +456,20 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 self.ipvt.swap(j, kmax);
             }
             let jj = j + self.m * j;
-            let mut ajnorm = self.fjack[jj..self.m - j + jj].enorm();
+            let mut ajnorm = self.fjac[jj..self.m - j + jj].enorm();
             if ajnorm == 0. {
                 self.wa1[j] = -ajnorm;
                 continue;
             }
-            if self.fjack[jj] < 0. {
+            if self.fjac[jj] < 0. {
                 ajnorm = -ajnorm;
             }
             ij = jj;
             for _ in j..self.m {
-                self.fjack[ij] /= ajnorm;
+                self.fjac[ij] /= ajnorm;
                 ij += 1;
             }
-            self.fjack[jj] += 1.;
+            self.fjac[jj] += 1.;
             // apply the transformation to the remaining columns
             // and update the norms.
             let jp1 = j + 1;
@@ -479,26 +479,26 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                     ij = j + self.m * k;
                     let mut jj = j + self.m * j;
                     for _ in j..self.m {
-                        sum += self.fjack[jj] * self.fjack[ij];
+                        sum += self.fjac[jj] * self.fjac[ij];
                         ij += 1;
                         jj += 1;
                     }
-                    let temp = sum / self.fjack[j + self.m * j];
+                    let temp = sum / self.fjac[j + self.m * j];
                     ij = j + self.m * k;
                     jj = j + self.m * j;
                     for _ in j..self.m {
-                        self.fjack[ij] -= temp * self.fjack[jj];
+                        self.fjac[ij] -= temp * self.fjac[jj];
                         ij += 1;
                         jj += 1;
                     }
                     if self.wa1[k] != 0. {
-                        let temp = self.fjack[j + self.m * k] / self.wa1[k];
+                        let temp = self.fjac[j + self.m * k] / self.wa1[k];
                         let temp = (1. - temp.powi(2)).max(0.);
                         self.wa1[k] *= temp.sqrt();
                         let temp = self.wa1[k] / self.wa3[k];
                         if 0.05 * temp * temp < f64::EPSILON {
                             let start = jp1 + self.m * k;
-                            self.wa1[k] = self.fjack[start..start + self.m - j - 1].enorm();
+                            self.wa1[k] = self.fjac[start..start + self.m - j - 1].enorm();
                             self.wa3[k] = self.wa1[k];
                         }
                     }
@@ -556,7 +556,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             self.x.push(self.xall[self.ifree[i]]);
         }
         self.qtf = vec![0.; self.nfree];
-        self.fjack = vec![0.; self.m * self.nfree];
+        self.fjac = vec![0.; self.m * self.nfree];
     }
 
     fn check_limits(&mut self) {
@@ -571,21 +571,21 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             let ij = j * self.m;
             if lpegged || upegged {
                 for i in 0..self.m {
-                    sum += self.fvec[i] * self.fjack[ij + i];
+                    sum += self.fvec[i] * self.fjac[ij + i];
                 }
             }
             // If pegged at lower limit and gradient is toward negative then
             // reset gradient to zero
             if lpegged && sum > 0. {
                 for i in 0..self.m {
-                    self.fjack[ij + i] = 0.;
+                    self.fjac[ij + i] = 0.;
                 }
             }
             // If pegged at upper limit and gradient is toward positive then
             // reset gradient to zero
             if upegged && sum < 0. {
                 for i in 0..self.m {
-                    self.fjack[ij + i] = 0.;
+                    self.fjac[ij + i] = 0.;
                 }
             }
         }
@@ -624,22 +624,22 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         self.wa4.copy_from_slice(&self.fvec);
         let mut jj = 0;
         for j in 0..self.nfree {
-            let temp = self.fjack[jj];
+            let temp = self.fjac[jj];
             if temp != 0. {
                 let mut sum = 0.0;
                 let mut ij = jj;
                 for i in j..self.m {
-                    sum += self.fjack[ij] * self.wa4[i];
+                    sum += self.fjac[ij] * self.wa4[i];
                     ij += 1;
                 }
                 let temp = -sum / temp;
                 ij = jj;
                 for i in j..self.m {
-                    self.wa4[i] += self.fjack[ij] * temp;
+                    self.wa4[i] += self.fjac[ij] * temp;
                     ij += 1;
                 }
             }
-            self.fjack[jj] = self.wa1[j];
+            self.fjac[jj] = self.wa1[j];
             jj += self.m + 1;
             self.qtf[j] = self.wa4[j];
         }
@@ -649,7 +649,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
     /// has been reduced to a (small) square matrix, and the test is O(N^2).
     fn check_is_finite(&self) -> bool {
         if !self.cfg.no_finite_check {
-            for val in &self.fjack {
+            for val in &self.fjac {
                 if !val.is_finite() {
                     return false;
                 }
@@ -669,7 +669,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                     let mut sum = 0.;
                     let mut ij = jj;
                     for i in 0..=j {
-                        sum += self.fjack[ij] * (self.qtf[i] / self.fnorm);
+                        sum += self.fjac[ij] * (self.qtf[i] / self.fnorm);
                         ij += 1;
                     }
                     gnorm = gnorm.max((sum / self.wa2[l]).abs());
@@ -808,7 +808,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         let mut jj = 0;
         for j in 0..self.nfree {
             self.wa3[j] = self.qtf[j];
-            if self.fjack[jj] == 0. && nsing == self.nfree {
+            if self.fjac[jj] == 0. && nsing == self.nfree {
                 nsing = j;
             }
             if nsing < self.nfree {
@@ -820,11 +820,11 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             for k in 0..nsing {
                 let j = nsing - k - 1;
                 let mut ij = self.m * j;
-                self.wa3[j] /= self.fjack[j + ij];
+                self.wa3[j] /= self.fjac[j + ij];
                 let temp = self.wa3[j];
                 if j > 0 {
                     for i in 0..j {
-                        self.wa3[i] -= self.fjack[ij] * temp;
+                        self.wa3[i] -= self.fjac[ij] * temp;
                         ij += 1;
                     }
                 }
@@ -861,11 +861,11 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 if j > 0 {
                     let mut ij = jj;
                     for i in 0..j {
-                        sum += self.fjack[ij] * self.wa3[i];
+                        sum += self.fjac[ij] * self.wa3[i];
                         ij += 1;
                     }
                 }
-                self.wa3[j] = (self.wa3[j] - sum) / self.fjack[j + self.m * j];
+                self.wa3[j] = (self.wa3[j] - sum) / self.fjac[j + self.m * j];
                 jj += self.m;
             }
             let temp = self.wa3[0..self.nfree].enorm();
@@ -879,7 +879,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             let mut sum = 0.;
             let mut ij = jj;
             for i in 0..=j {
-                sum += self.fjack[ij] * self.qtf[i];
+                sum += self.fjac[ij] * self.qtf[i];
                 ij += 1;
             }
             let l = self.ipvt[j];
@@ -935,7 +935,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 if jp1 < self.nfree {
                     let mut ij = jp1 + jj;
                     for i in jp1..self.nfree {
-                        self.wa3[i] -= self.fjack[ij] * temp;
+                        self.wa3[i] -= self.fjac[ij] * temp;
                         ij += 1;
                     }
                 }
@@ -1050,11 +1050,11 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             let mut ij = kk;
             let mut ik = kk;
             for _ in j..self.nfree {
-                self.fjack[ij] = self.fjack[ik];
+                self.fjac[ij] = self.fjac[ik];
                 ij += 1;
                 ik += self.m;
             }
-            self.wa1[j] = self.fjack[kk];
+            self.wa1[j] = self.fjac[kk];
             self.wa4[j] = self.qtf[j];
             kk += self.m + 1;
         }
@@ -1087,13 +1087,13 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                         continue;
                     }
                     let kk = k + self.m * k;
-                    let (sinx, cosx) = if self.fjack[kk].abs() < self.wa2[k].abs() {
-                        let cotan = self.fjack[kk] / self.wa2[k];
+                    let (sinx, cosx) = if self.fjac[kk].abs() < self.wa2[k].abs() {
+                        let cotan = self.fjac[kk] / self.wa2[k];
                         let sinx = 0.5 / (0.25 + 0.25 * cotan * cotan).sqrt();
                         let cosx = sinx * cotan;
                         (sinx, cosx)
                     } else {
-                        let tanx = self.wa2[k] / self.fjack[kk];
+                        let tanx = self.wa2[k] / self.fjac[kk];
                         let cosx = 0.5 / (0.25 + 0.25 * tanx * tanx).sqrt();
                         let sinx = cosx * tanx;
                         (sinx, cosx)
@@ -1102,7 +1102,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                      *	    compute the modified diagonal element of r and
                      *	    the modified element of ((q transpose)*b,0).
                      */
-                    self.fjack[kk] = cosx * self.fjack[kk] + sinx * self.wa2[k];
+                    self.fjac[kk] = cosx * self.fjac[kk] + sinx * self.wa2[k];
                     let temp = cosx * self.wa4[k] + sinx * qtbpj;
                     qtbpj = -sinx * self.wa4[k] + cosx * qtbpj;
                     self.wa4[k] = temp;
@@ -1113,9 +1113,9 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                     if self.nfree > kp1 {
                         let mut ik = kk + 1;
                         for i in kp1..self.nfree {
-                            let temp = cosx * self.fjack[ik] + sinx * self.wa2[i];
-                            self.wa2[i] = -sinx * self.fjack[ik] + cosx * self.wa2[i];
-                            self.fjack[ik] = temp;
+                            let temp = cosx * self.fjac[ik] + sinx * self.wa2[i];
+                            self.wa2[i] = -sinx * self.fjac[ik] + cosx * self.wa2[i];
+                            self.fjac[ik] = temp;
                             ik += 1;
                         }
                     }
@@ -1126,8 +1126,8 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
              *	 the corresponding diagonal element of r.
              */
             let kk = j + self.m * j;
-            self.wa2[j] = self.fjack[kk];
-            self.fjack[kk] = self.wa1[j];
+            self.wa2[j] = self.fjac[kk];
+            self.fjac[kk] = self.wa1[j];
         }
         /*
          *     solve the triangular system for z. if the system is
@@ -1150,7 +1150,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 if nsing > jp1 {
                     let mut ij = jp1 + self.m * j;
                     for i in jp1..nsing {
-                        sum += self.fjack[ij] * self.wa4[i];
+                        sum += self.fjac[ij] * self.wa4[i];
                         ij += 1;
                     }
                 }
@@ -1164,6 +1164,213 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             self.wa1[self.ipvt[j]] = self.wa4[j];
         }
     }
+
+    fn iterate(&mut self, gnorm: f64) -> MPDone {
+        for j in 0..self.nfree {
+            self.wa1[j] = -self.wa1[j];
+        }
+        let mut alpha: f64 = 1.0;
+        if !self.qanylim {
+            /* No parameter limits, so just move to new position WA2 */
+            for j in 0..self.nfree {
+                self.wa2[j] = self.x[j] + self.wa1[j];
+            }
+        } else {
+            /* Respect the limits.  If a step were to go out of bounds, then
+             * we should take a step in the same direction but shorter distance.
+             * The step should take us right to the limit in that case.
+             */
+            for j in 0..self.nfree {
+                let lpegged = self.qllim[j] && self.x[j] <= self.llim[j];
+                let upegged = self.qulim[j] && self.x[j] >= self.ulim[j];
+                let dwa1 = self.wa1[j].abs() > f64::EPSILON;
+                if lpegged && self.wa1[j] < 0. {
+                    self.wa1[j] = 0.;
+                }
+                if upegged && self.wa1[j] > 0. {
+                    self.wa1[j] = 0.;
+                }
+                if dwa1 && self.qllim[j] && self.x[j] + self.wa1[j] < self.llim[j] {
+                    alpha = alpha.min((self.llim[j] - self.x[j]) / self.wa1[j]);
+                }
+                if dwa1 && self.qulim[j] && self.x[j] + self.wa1[j] > self.ulim[j] {
+                    alpha = alpha.min((self.ulim[j] - self.x[j]) / self.wa1[j]);
+                }
+            }
+            /* Scale the resulting vector, advance to the next position */
+            for j in 0..self.nfree {
+                self.wa1[j] = self.wa1[j] * alpha;
+                self.wa2[j] = self.x[j] + self.wa1[j];
+                /*
+                 * Adjust the output values.  If the step put us exactly
+                 * on a boundary, make sure it is exact.
+                 */
+                let sgnu = if self.ulim[j] >= 0. { 1. } else { -1. };
+                let sgnl = if self.llim[j] >= 0. { 1. } else { -1. };
+                let ulim1 = self.ulim[j] * (1. - sgnu * f64::EPSILON)
+                    - if self.ulim[j] == 0. { f64::EPSILON } else { 0. };
+                let llim1 = self.llim[j] * (1. + sgnl * f64::EPSILON)
+                    + if self.llim[j] == 0. { f64::EPSILON } else { 0. };
+                if self.qulim[j] && self.wa2[j] >= ulim1 {
+                    self.wa2[j] = self.ulim[j];
+                }
+                if self.qllim[j] && self.wa2[j] <= llim1 {
+                    self.wa2[j] = self.llim[j];
+                }
+            }
+        }
+        for j in 0..self.nfree {
+            self.wa3[j] = self.diag[self.ifree[j]] * self.wa1[j];
+        }
+        let pnorm = self.wa3[0..self.nfree].enorm();
+        /*
+         *	    on the first iteration, adjust the initial step bound.
+         */
+        if self.iter == 1 {
+            self.delta = self.delta.min(pnorm);
+        }
+        /*
+         *	    evaluate the function at x + p and calculate its norm.
+         */
+        for i in 0..self.nfree {
+            self.xnew[self.ifree[i]] = self.wa2[i];
+        }
+        self.f.eval(&self.xnew, &mut self.wa4);
+        self.nfev += 1;
+        // TODO: user function may return an error which we have to handle here
+        self.fnorm1 = self.wa4[0..self.m].enorm();
+        /*
+         *	    compute the scaled actual reduction.
+         */
+        let actred = if 0.1 * self.fnorm1 < self.fnorm {
+            let temp = self.fnorm1 / self.fnorm;
+            1.0 - temp * temp
+        } else {
+            -1.0
+        };
+        /*
+         *	    compute the scaled predicted reduction and
+         *	    the scaled directional derivative.
+         */
+        let mut jj = 0;
+        for j in 0..self.nfree {
+            self.wa3[j] = 0.;
+            let l = self.ipvt[j];
+            let temp = self.wa1[l];
+            let mut ij = jj;
+            for i in 0..=j {
+                self.wa3[i] += self.fjac[ij] * temp;
+                ij += 1;
+            }
+            jj += self.m;
+        }
+        /*
+         * Remember, alpha is the fraction of the full LM step actually
+         * taken
+         */
+        let temp1 = self.wa3[0..self.nfree].enorm() * alpha / self.fnorm;
+        let temp2 = ((alpha * self.par).sqrt() * pnorm) / self.fnorm;
+        let temp11 = temp1 * temp1;
+        let temp22 = temp2 * temp2;
+        let prered = temp11 + temp22 / 0.5;
+        let dirder = -(temp11 + temp22);
+        /*
+         *	    compute the ratio of the actual to the predicted
+         *	    reduction.
+         */
+        let ratio = if prered != 0. { actred / prered } else { 0. };
+        /*
+         *	    update the step bound.
+         */
+        if ratio <= 0.25 {
+            let mut temp = if actred >= 0. {
+                0.5
+            } else {
+                0.5 * dirder / (dirder + 0.5 * actred)
+            };
+            if 0.1 * self.fnorm1 >= self.fnorm || temp < 0.1 {
+                temp = 0.1;
+            }
+            self.delta = temp * self.delta.min(pnorm / 0.1);
+            self.par = self.par / temp;
+        } else {
+            if self.par == 0. || ratio >= 0.75 {
+                self.delta = pnorm / 0.5;
+                self.par = 0.5 * self.par;
+            }
+        }
+        /*
+         *	    test for successful iteration.
+         */
+        if ratio >= 1e-4 {
+            /*
+             *	    successful iteration. update x, fvec, and their norms.
+             */
+            for j in 0..self.nfree {
+                self.x[j] = self.wa2[j];
+                self.wa2[j] = self.diag[self.ifree[j]] * self.x[j];
+            }
+            for i in 0..self.m {
+                self.fvec[i] = self.wa4[i];
+            }
+            self.xnorm = self.wa2[0..self.nfree].enorm();
+            self.fnorm = self.fnorm1;
+            self.iter += 1;
+        }
+        /*
+         *	    tests for convergence.
+         */
+        if actred.abs() <= self.cfg.ftol && prered <= self.cfg.ftol && 0.5 * ratio <= 1.0 {
+            self.info = MPSuccess::Chi;
+        }
+        if self.delta <= self.cfg.xtol * self.xnorm {
+            self.info = MPSuccess::Par;
+        }
+        if actred.abs() <= self.cfg.ftol
+            && prered <= self.cfg.ftol
+            && 0.5 * ratio <= 1.0
+            && self.info == MPSuccess::Par
+        {
+            self.info = MPSuccess::Both;
+        }
+        if self.info != MPSuccess::NotDone {
+            return MPDone::Exit;
+        }
+        /*
+         *	    tests for termination and stringent tolerances.
+         */
+        if self.cfg.max_fev > 0 && self.nfev >= self.cfg.max_fev {
+            /* Too many function evaluations */
+            self.info = MPSuccess::MaxIter;
+        }
+        if self.iter >= self.cfg.max_iter {
+            /* Too many iterations */
+            self.info = MPSuccess::MaxIter;
+        }
+        if actred.abs() <= f64::EPSILON && prered <= f64::EPSILON && 0.5 * ratio <= 1.0 {
+            self.info = MPSuccess::Ftol;
+        }
+        if self.delta <= f64::EPSILON * self.xnorm {
+            self.info = MPSuccess::Xtol;
+        }
+        if gnorm <= f64::EPSILON {
+            self.info = MPSuccess::Gtol;
+        }
+        if self.info != MPSuccess::NotDone {
+            return MPDone::Exit;
+        }
+        if ratio < 1e-4 {
+            MPDone::Inner
+        } else {
+            MPDone::Outer
+        }
+    }
+}
+
+enum MPDone {
+    Exit,
+    Inner,
+    Outer,
 }
 
 pub fn mpfit<T: MPFitter>(
@@ -1196,7 +1403,7 @@ pub fn mpfit<T: MPFitter>(
         if gnorm <= config.gtol {
             fit.info = MPSuccess::Dir;
         }
-        if fit.info != MPSuccess::Error {
+        if fit.info != MPSuccess::NotDone {
             return fit.terminate();
         }
         if config.max_iter == 0 {
@@ -1206,7 +1413,11 @@ pub fn mpfit<T: MPFitter>(
         fit.rescale();
         loop {
             fit.lmpar();
-            return fit.terminate();
+            match fit.iterate(gnorm) {
+                MPDone::Exit => return fit.terminate(),
+                MPDone::Inner => continue,
+                MPDone::Outer => break,
+            }
         }
     }
 }
