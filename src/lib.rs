@@ -87,7 +87,7 @@ pub enum MPError {
 }
 
 /// Potential success status
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub enum MPSuccess {
     /// Not finished iterations
     NotDone,
@@ -1722,7 +1722,7 @@ impl fmt::Display for MPSuccess {
 
 #[cfg(test)]
 mod tests {
-    use crate::{mpfit, MPFitter};
+    use crate::{mpfit, MPFitter, MPSuccess};
     use assert_approx_eq::assert_approx_eq;
 
     #[test]
@@ -1782,6 +1782,7 @@ mod tests {
         match res {
             Ok(status) => {
                 println!("Linear fit status: {}", status.success);
+                assert_eq!(status.success, MPSuccess::Chi);
                 assert_approx_eq!(init[0], 3.20996572);
                 assert_approx_eq!(init[1], 1.77095420);
                 assert_eq!(status.n_iter, 3);
