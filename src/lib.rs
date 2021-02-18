@@ -1,7 +1,7 @@
 use std::fmt;
 use std::fmt::Formatter;
 
-pub type MPResult = Result<MPStatus, MPError>;
+pub type MPResult<T> = Result<T, MPError>;
 
 /// Definition of a parameter constraint structure
 pub struct MPPar {
@@ -70,7 +70,6 @@ impl ::std::default::Default for MPConfig {
 
 /// MP Fit errors
 pub enum MPError {
-    Unknown,
     /// General input parameter error
     Input,
     /// User function produced non-finite values
@@ -186,13 +185,13 @@ struct MPFit<'a, F: MPFitter> {
 }
 
 impl<'a, F: MPFitter> MPFit<'a, F> {
-    fn new(f: &'a F, xall: &'a mut [f64], cfg: &'a MPConfig) -> Option<MPFit<'a, F>> {
+    fn new(f: &'a F, xall: &'a mut [f64], cfg: &'a MPConfig) -> MPResult<MPFit<'a, F>> {
         let m = f.number_of_points();
         let npar = xall.len();
         if m == 0 {
-            None
+            Err(MPError::Empty)
         } else {
-            Some(MPFit {
+            Ok(MPFit {
                 m,
                 npar,
                 nfree: 0,
@@ -495,7 +494,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         }
     }
 
-    fn parse_params(&mut self, params: Option<&[MPPar]>) -> MPError {
+    fn parse_params(&mut self, params: Option<&[MPPar]>) -> MPResult<()> {
         match &params {
             None => {
                 self.nfree = self.npar;
@@ -503,10 +502,13 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             }
             Some(pars) => {
                 if pars.len() == 0 {
-                    return MPError::Empty;
+                    return Err(MPError::Empty);
                 }
                 for (i, p) in pars.iter().enumerate() {
                     if p.fixed {
+                        if self.xall[i] < p.limit_low || self.xall[i] > p.limit_up {
+                            return Err(MPError::Bounds);
+                        }
                         self.qllim.push(p.limited_low);
                         self.qulim.push(p.limited_up);
                         self.llim.push(p.limit_low);
@@ -515,6 +517,9 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                             self.qanylim = true;
                         }
                     } else {
+                        if p.limited_low && p.limited_up && p.limit_low >= p.limit_up {
+                            return Err(MPError::Bounds);
+                        }
                         self.nfree += 1;
                         self.ifree.push(i);
                     }
@@ -522,14 +527,14 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                     self.dstep.push(p.rel_step);
                 }
                 if self.nfree == 0 {
-                    return MPError::NoFree;
+                    return Err(MPError::NoFree);
                 }
             }
         };
         if self.m < self.nfree {
-            return MPError::DoF;
+            return Err(MPError::DoF);
         }
-        MPError::Unknown
+        Ok(())
     }
 
     // Initialize Levenberg-Marquardt parameter and iteration counter
@@ -667,7 +672,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         gnorm
     }
 
-    fn terminate(mut self, params: Option<&[MPPar]>) -> MPResult {
+    fn terminate(mut self, params: Option<&[MPPar]>) -> MPResult<MPStatus> {
         for i in 0..self.nfree {
             self.xall[self.ifree[i]] = self.x[i];
         }
@@ -1529,6 +1534,20 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             MPDone::Outer
         }
     }
+
+    fn check_config(&self) -> MPResult<()> {
+        if self.cfg.ftol <= 0.
+            || self.cfg.xtol <= 0.
+            || self.cfg.gtol <= 0.
+            || self.cfg.step_factor <= 0.
+        {
+            Err(MPError::Input)
+        } else if self.m < self.nfree {
+            Err(MPError::DoF)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 enum MPDone {
@@ -1542,16 +1561,10 @@ pub fn mpfit<T: MPFitter>(
     xall: &mut [f64],
     params: Option<&[MPPar]>,
     config: &MPConfig,
-) -> MPResult {
-    let mut fit = match MPFit::new(&f, xall, config) {
-        None => return Err(MPError::Empty),
-        Some(v) => v,
-    };
-    let params_error = fit.parse_params(params);
-    match &params_error {
-        MPError::Unknown => (),
-        _ => return Err(params_error),
-    }
+) -> MPResult<MPStatus> {
+    let mut fit = MPFit::new(&f, xall, config)?;
+    fit.check_config()?;
+    fit.parse_params(params)?;
     fit.init_lm();
     loop {
         fit.fill_xnew();
@@ -1675,7 +1688,6 @@ impl fmt::Display for MPError {
             f,
             "{}",
             match self {
-                MPError::Unknown => "error unknown",
                 MPError::Input => "general input parameter error",
                 MPError::Nan => "user function produced non-finite values",
                 MPError::Empty => "no user data points were supplied",
