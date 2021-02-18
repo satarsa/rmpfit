@@ -1,14 +1,20 @@
 use std::fmt;
 use std::fmt::Formatter;
 
+/// mpfit return result
 pub type MPResult<T> = Result<T, MPError>;
 
 /// Definition of a parameter constraint structure
 pub struct MPPar {
+    /// Parameter is fixed
     pub fixed: bool,
+    /// parameter is fixed at the lower boundary
     pub limited_low: bool,
+    /// parameter is fixed at the upper boundary
     pub limited_up: bool,
+    /// fixed value at the lower boundary
     pub limit_low: f64,
+    /// fixed value at the upper boundary
     pub limit_up: f64,
     /// Step size for finite difference
     pub step: f64,
