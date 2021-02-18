@@ -1688,6 +1688,26 @@ impl fmt::Display for MPError {
     }
 }
 
+impl fmt::Display for MPSuccess {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                MPSuccess::NotDone => "unknown error",
+                MPSuccess::Chi => "convergence in chi-square value",
+                MPSuccess::Par => "convergence in parameter value",
+                MPSuccess::Both => "convergence in chi-square and parameter values",
+                MPSuccess::Dir => "convergence in orthogonality",
+                MPSuccess::MaxIter => "maximum number of iterations reached",
+                MPSuccess::Ftol => "ftol is too small; no further improvement",
+                MPSuccess::Xtol => "xtol is too small; no further improvement",
+                MPSuccess::Gtol => "gtol is too small; no further improvement",
+            }
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{mpfit, MPFitter};
@@ -1749,6 +1769,7 @@ mod tests {
         let res = mpfit(l, &mut init, None, &Default::default());
         match res {
             Ok(status) => {
+                println!("Linear fit status: {}", status.success);
                 assert_approx_eq!(init[0], 3.20996572);
                 assert_approx_eq!(init[1], 1.77095420);
                 assert_eq!(status.n_iter, 3);
