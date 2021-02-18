@@ -303,7 +303,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
     ///     argonne national laboratory. minpack project. march 1980.
     ///     burton s. garbow, kenneth e. hillstrom, jorge j. more
     ///
-    fn fdjack2(&mut self, config: &MPConfig) {
+    fn fdjac2(&mut self, config: &MPConfig) {
         // Calculate the Jacobian matrix
         let eps = config.epsfcn.max(f64::EPSILON).sqrt();
         // TODO: probably sides and analytical derivatives should be implemented at some point
@@ -1555,7 +1555,7 @@ pub fn mpfit<T: MPFitter>(
     fit.init_lm();
     loop {
         fit.fill_xnew();
-        fit.fdjack2(&config);
+        fit.fdjac2(&config);
         fit.check_limits();
         fit.qrfac();
         fit.scale();
