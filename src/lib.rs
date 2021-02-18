@@ -681,7 +681,10 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         gnorm
     }
 
-    fn terminate(&self) -> MPResult {
+    fn terminate(&mut self) -> MPResult {
+        for i in 0..self.nfree {
+            self.xall[self.ifree[i]] = self.x[i];
+        }
         MPResult::Success(
             MPSuccess::Both,
             MPStatus {
@@ -1509,6 +1512,7 @@ impl ENorm for [f64] {
 #[cfg(test)]
 mod tests {
     use crate::{mpfit, MPFitter};
+    use assert_approx_eq::assert_approx_eq;
 
     #[test]
     fn linear() {
@@ -1564,5 +1568,7 @@ mod tests {
         };
         let mut init = [1., 1.];
         let _ = mpfit(l, &mut init, None, &Default::default());
+        assert_approx_eq!(init[0], 3.20996572);
+        assert_approx_eq!(init[1], 1.77095420);
     }
 }
