@@ -1,24 +1,128 @@
+//! Very simple pure Rust implementation of the
+//! [CMPFIT](https://pages.physics.wisc.edu/~craigm/idl/cmpfit.html) library:
+//! the Levenberg-Marquardt technique to solve the least-squares problem.
+//!
+//! The code is mainly copied directly from CMPFIT almost without changing.
+//! The original CMPFIT tests (Linear (free parameters), Quad (free and fixed parameters),
+//! and Gaussian (free and fixed parameters) function) are reproduced and passed.
+//!
+//! Just a few obvoius Rust-specific optimizations are done:
+//! * Removing ```goto``` (fuf).
+//! * Standart Rust Result as result.
+//! * A few loops are zipped to help the compiler optimize the code
+//!     (no performance tests are done anyway).
+//! * Using trait ```MPFitter``` to call the user code.
+//! * Using ```bool``` type if possible.
+//!
+//! # Advantages
+//! * Pure Rust.
+//! * No external dependencies
+//!     ([assert_approx_eq](https://docs.rs/assert_approx_eq/) just for testing).
+//! * Internal Jacobian calculations.
+//!
+//! # Disadvantages
+//! * Sided, analitical or user provided derivates are not implemented.
+//!
+//! # Usage Example
+//! A user should implement trait ```MPFitter``` for its struct.
+//! ```
+//! use rmpfit::{MPFitter, MPResult, mpfit};
+//!
+//! struct Linear {
+//!     x: Vec<f64>,
+//!     y: Vec<f64>,
+//!     ye: Vec<f64>,
+//! };
+//!
+//! impl MPFitter for Linear {
+//!     fn eval(&self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
+//!         for (((d, x), y), ye) in deviates
+//!             .iter_mut()
+//!             .zip(self.x.iter())
+//!             .zip(self.y.iter())
+//!             .zip(self.ye.iter())
+//!             {
+//!                 let f = params[0] + params[1] * *x;
+//!                 *d = (*y - f) / *ye;
+//!             }
+//!             Ok(())
+//!         }
+//!
+//!         fn number_of_points(&self) -> usize {
+//!             self.x.len()
+//!         }
+//!     }
+//!
+//!     let l = Linear {
+//!         x: vec![
+//!                 -1.7237128E+00,
+//!                 1.8712276E+00,
+//!                 -9.6608055E-01,
+//!                 -2.8394297E-01,
+//!                 1.3416969E+00,
+//!                 1.3757038E+00,
+//!                 -1.3703436E+00,
+//!                 4.2581975E-02,
+//!                 -1.4970151E-01,
+//!                 8.2065094E-01,
+//!         ],
+//!         y: vec![
+//!                 1.9000429E-01,
+//!                 6.5807428E+00,
+//!                 1.4582725E+00,
+//!                 2.7270851E+00,
+//!                 5.5969253E+00,
+//!                 5.6249280E+00,
+//!                 0.787615,
+//!                 3.2599759E+00,
+//!                 2.9771762E+00,
+//!                 4.5936475E+00,
+//!         ],
+//!         ye: vec![0.07; 10],
+//!     };
+//!     // initializing input parameters
+//!     let mut init = [1., 1.];
+//!     let res = mpfit(&l, &mut init, None, &Default::default()).unwrap();
+//!     assert_approx_eq!(init[0], 3.20996572); // actual 3.2
+//!     assert_approx_eq!(status.xerror[0], 0.02221018);
+//!     assert_approx_eq!(init[1], 1.77095420); // actual 1.78
+//!     assert_approx_eq!(status.xerror[1], 0.01893756);
+//! ```
+//! then ```init``` will contain the refined parameters of the fitting function.
+//! If user function fails to calculate residuals, it should return ```MPError::Eval```.
+//!
 use std::fmt;
 use std::fmt::Formatter;
 
-/// mpfit return result
+/// MPFIT return result
 pub type MPResult<T> = Result<T, MPError>;
 
-/// Definition of a parameter constraint structure
+/// Parameter constraint structure
 pub struct MPPar {
-    /// Parameter is fixed
+    /// A boolean value, whether the parameter is to be held
+    /// fixed or not. Fixed parameters are not varied by
+    /// MPFIT, but are passed on to ```MPFitter``` for evaluation.
     pub fixed: bool,
-    /// parameter is fixed at the lower boundary
+    /// Is the parameter fixed at the lower boundary? If ```true```,
+    /// then the parameter is bounded on the lower side.
     pub limited_low: bool,
-    /// parameter is fixed at the upper boundary
+    /// Is the parameter fixed at the upper boundary? If ```true```,
+    /// then the parameter is bounded on the upper side.
     pub limited_up: bool,
-    /// fixed value at the lower boundary
+    /// Gives the parameter limit on the lower side.
     pub limit_low: f64,
-    /// fixed value at the upper boundary
+    /// Gives the parameter limit on the upper side.
     pub limit_up: f64,
-    /// Step size for finite difference
+    /// The step size to be used in calculating the numerical
+    /// derivatives. If set to zero, then the step size is computed automatically.
+    /// This value is superseded by the ```MPConfig::rel_step``` value.
     pub step: f64,
-    /// Relative step size for finite difference
+    /// The *relative* step size to be used in calculating
+    /// the numerical derivatives.  This number is the
+    /// fractional size of the step, compared to the
+    /// parameter value.  This value supersedes the ```MPConfig::step```
+    /// setting.  If the parameter is zero, then a default
+    /// step size is chosen.
     pub rel_step: f64,
 }
 
@@ -36,37 +140,35 @@ impl ::std::default::Default for MPPar {
     }
 }
 
-/// Definition of MPFIT configuration structure
+/// MPFIT configuration structure
 pub struct MPConfig {
-    /// Relative chi-square convergence criterion  Default: 1e-10
+    /// Relative chi-square convergence criterion (Default: 1e-10)
     pub ftol: f64,
-    /// Relative parameter convergence criterion   Default: 1e-10
+    /// Relative parameter convergence criterion  (Default: 1e-10)
     pub xtol: f64,
-    /// Orthogonality convergence criterion        Default: 1e-10
+    /// Orthogonality convergence criterion        (Default: 1e-10)
     pub gtol: f64,
-    /// Finite derivative step size                Default: f64::EPSILON
+    /// Finite derivative step size                (Default: f64::EPSILON)
     pub epsfcn: f64,
-    /// Initial step bound                         Default: 100.0
+    /// Initial step bound                         (Default: 100.0)
     pub step_factor: f64,
-    /// Range tolerance for covariance calculation Default: 1e-14
+    /// Range tolerance for covariance calculation (Default: 1e-14)
     pub covtol: f64,
-    /// Maximum number of iterations.  If maxiter == 0,
+    /// Maximum number of iterations (Default: 200).  If maxiter == 0,
     /// then basic error checking is done, and parameter
     /// errors/covariances are estimated based on input
     /// parameter values, but no fitting iterations are done.
     pub max_iter: usize,
     /// Maximum number of function evaluations, or 0 for no limit
-    /// Default: 0 (no limit)
+    /// (Default: 0 (no limit))
     pub max_fev: usize,
-    /// Default: true
-    pub n_print: bool,
     /// Scale variables by user values?
     /// true = yes, user scale values in diag;
-    /// false = no, variables scaled internally (Default)
+    /// false = no, variables scaled internally (Default: false)
     pub do_user_scale: bool,
     /// Disable check for infinite quantities from user?
-    /// true = perform check
-    /// false = do not perform check (Default)
+    /// true = perform check;
+    /// false = do not perform check (Default: false)
     pub no_finite_check: bool,
 }
 
@@ -81,14 +183,13 @@ impl ::std::default::Default for MPConfig {
             covtol: 1e-14,
             max_iter: 200,
             max_fev: 0,
-            n_print: true,
             do_user_scale: false,
             no_finite_check: false,
         }
     }
 }
 
-/// MP Fit errors
+/// MPFIT error status
 pub enum MPError {
     /// General input parameter error
     Input,
@@ -131,8 +232,9 @@ pub enum MPSuccess {
     Gtol,
 }
 
-/// Definition of results structure, for when fit completes
+/// Status structure, for fit when it completes
 pub struct MPStatus {
+    /// Success enum
     pub success: MPSuccess,
     /// Final chi^2
     pub best_norm: f64,
@@ -158,9 +260,16 @@ pub struct MPStatus {
     pub covar: Vec<f64>,
 }
 
+/// Trait to be implemented by user.
 pub trait MPFitter {
+    /// Main evaluation procedure which is called from ```mpfit```. Size of ```deviates``` is equal
+    /// to the value returned by ```number_of_points```. User should compute the residuals
+    /// using parameters from ```params``` and any user data that are required, and fill
+    /// the ```deviates``` slice.
+    /// The residuals are defined as ```(y[i] - f(x[i]))/y_error[i]```.
     fn eval(&self, params: &[f64], deviates: &mut [f64]) -> MPResult<()>;
 
+    /// Number of the data points in user private data.
     fn number_of_points(&self) -> usize;
 }
 
@@ -169,7 +278,8 @@ const MP_RDWARF: f64 = 1.8269129289596699e-153;
 /// f64::MAX.sqrt() * 0.1
 const MP_RGIANT: f64 = 1.3407807799935083e+153;
 
-struct MPFit<'a, F: MPFitter> {
+/// Internal structure to hold calculated values.
+struct MPFit<'a, T: MPFitter> {
     m: usize,
     npar: usize,
     nfree: usize,
@@ -188,7 +298,7 @@ struct MPFit<'a, F: MPFitter> {
     llim: Vec<f64>,
     ulim: Vec<f64>,
     qanylim: bool,
-    f: &'a F,
+    f: &'a T,
     wa1: Vec<f64>,
     wa2: Vec<f64>,
     wa3: Vec<f64>,
@@ -1579,13 +1689,19 @@ enum MPDone {
     Outer,
 }
 
+/// Main function to refine the parameters.
+/// # Arguments
+/// * `f` - A reference to a user struct which implements trait ```MPFitter```
+/// * `xall` - A mutable slice with starting fit parameters
+/// * `params` - A possible slice with parameter configurations
+/// * `config` - ```MPConifg``` to configure the fit
 pub fn mpfit<T: MPFitter>(
-    f: T,
+    f: &T,
     xall: &mut [f64],
     params: Option<&[MPPar]>,
     config: &MPConfig,
 ) -> MPResult<MPStatus> {
-    let mut fit = MPFit::new(&f, xall, config)?;
+    let mut fit = MPFit::new(f, xall, config)?;
     fit.check_config()?;
     fit.parse_params(params)?;
     fit.init_lm()?;
@@ -1804,7 +1920,7 @@ mod tests {
             ye: vec![0.07; 10],
         };
         let mut init = [1., 1.];
-        let res = mpfit(l, &mut init, None, &Default::default());
+        let res = mpfit(&l, &mut init, None, &Default::default());
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
@@ -1830,7 +1946,7 @@ mod tests {
             ye: Vec<f64>,
         };
 
-        impl MPFitter for &Quad {
+        impl MPFitter for Quad {
             fn eval(&self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
                 for (((d, x), y), ye) in deviates
                     .iter_mut()
@@ -1926,7 +2042,7 @@ mod tests {
             ye: Vec<f64>,
         };
 
-        impl MPFitter for &Gaussian {
+        impl MPFitter for Gaussian {
             fn eval(&self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
                 let sig2 = params[3] * params[3];
                 for (((d, x), y), ye) in deviates
