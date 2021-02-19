@@ -24,7 +24,7 @@
 //! * Sided, analitical or user provided derivates are not implemented.
 //!
 //! # Usage Example
-//! A user should implement trait ```MPFitter``` for its struct.
+//! A user should implement trait ```MPFitter``` for its struct:
 //! ```
 //! use rmpfit::{MPFitter, MPResult, mpfit};
 //!
@@ -32,7 +32,7 @@
 //!     x: Vec<f64>,
 //!     y: Vec<f64>,
 //!     ye: Vec<f64>,
-//! };
+//! }
 //!
 //! impl MPFitter for Linear {
 //!     fn eval(&self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
@@ -53,7 +53,7 @@
 //!         }
 //!     }
 //!
-//!     let l = Linear {
+//! let l = Linear {
 //!         x: vec![
 //!                 -1.7237128E+00,
 //!                 1.8712276E+00,
@@ -81,12 +81,12 @@
 //!         ye: vec![0.07; 10],
 //!     };
 //!     // initializing input parameters
-//!     let mut init = [1., 1.];
-//!     let res = mpfit(&l, &mut init, None, &Default::default()).unwrap();
-//!     assert_approx_eq!(init[0], 3.20996572); // actual 3.2
-//!     assert_approx_eq!(status.xerror[0], 0.02221018);
-//!     assert_approx_eq!(init[1], 1.77095420); // actual 1.78
-//!     assert_approx_eq!(status.xerror[1], 0.01893756);
+//! let mut init = [1., 1.];
+//! let res = mpfit(&l, &mut init, None, &Default::default()).unwrap();
+//! assert_approx_eq!(init[0], 3.20996572); // actual 3.2
+//! assert_approx_eq!(status.xerror[0], 0.02221018);
+//! assert_approx_eq!(init[1], 1.77095420); // actual 1.78
+//! assert_approx_eq!(status.xerror[1], 0.01893756);
 //! ```
 //! then ```init``` will contain the refined parameters of the fitting function.
 //! If user function fails to calculate residuals, it should return ```MPError::Eval```.
