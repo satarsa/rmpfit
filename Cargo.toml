@@ -3,6 +3,10 @@ name = "rmpfit"
 version = "0.1.0"
 authors = ["Vadim Dyadkin <dyadkin@3lp.cx>"]
 edition = "2018"
+description = "Pure Rust implementation of the CMPFIT library"
+repository = "https://git.3lp.cx/dyadkin/rmpfit"
+license = "MIT"
+keywords = ["Levenberg-Marquardt", "least-squares", "fit"]
 
 [dev-dependencies]
 assert_approx_eq = "1.1.0"
