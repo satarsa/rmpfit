@@ -22,6 +22,20 @@ pub struct MPPar {
     pub rel_step: f64,
 }
 
+impl ::std::default::Default for MPPar {
+    fn default() -> Self {
+        MPPar {
+            fixed: false,
+            limited_low: false,
+            limited_up: false,
+            limit_low: 0.0,
+            limit_up: 0.0,
+            step: 0.0,
+            rel_step: 0.0,
+        }
+    }
+}
+
 /// Definition of MPFIT configuration structure
 pub struct MPConfig {
     /// Relative chi-square convergence criterion  Default: 1e-10
@@ -314,10 +328,12 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         // Calculate the Jacobian matrix
         let eps = self.cfg.epsfcn.max(f64::EPSILON).sqrt();
         // TODO: probably sides and analytical derivatives should be implemented at some point
+        self.fjac.fill(0.);
         let mut ij = 0;
+        /* Any parameters requiring numerical derivatives */
         for j in 0..self.nfree {
             let free_p = self.ifree[j];
-            let temp = self.x[free_p];
+            let temp = self.xnew[free_p];
             let mut h = eps * temp.abs();
             if free_p < self.step.len() && self.step[free_p] > 0. {
                 h = self.step[free_p];
@@ -335,10 +351,10 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             {
                 h = -h;
             }
-            self.x[self.ifree[j]] = temp + h;
-            self.f.eval(&self.x, &mut self.wa4)?;
+            self.xnew[free_p] = temp + h;
+            self.f.eval(&self.xnew, &mut self.wa4)?;
             self.nfev += 1;
-            self.x[self.ifree[j]] = temp;
+            self.xnew[free_p] = temp;
             for i in 0..self.m {
                 self.fjac[ij] = (self.wa4[i] - self.fvec[i]) / h;
                 ij += 1;
@@ -704,10 +720,10 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         /* Compute and return the covariance matrix and/or parameter errors */
         self = self.covar();
         let mut covar = vec![0.; self.npar * self.npar];
-        for j in 0..self.npar {
+        for j in 0..self.nfree {
             let k = self.ifree[j] * self.npar;
             let l = j * self.m;
-            for i in 0..self.npar {
+            for i in 0..self.nfree {
                 covar[k + self.ifree[i]] = self.fjac[l + i]
             }
         }
@@ -1734,7 +1750,7 @@ impl fmt::Display for MPSuccess {
 
 #[cfg(test)]
 mod tests {
-    use crate::{mpfit, MPFitter, MPResult, MPSuccess};
+    use crate::{mpfit, MPFitter, MPPar, MPResult, MPSuccess};
     use assert_approx_eq::assert_approx_eq;
 
     #[test]
@@ -1817,7 +1833,7 @@ mod tests {
             ye: Vec<f64>,
         };
 
-        impl MPFitter for Quad {
+        impl MPFitter for &Quad {
             fn eval(&self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
                 for (((d, x), y), ye) in deviates
                     .iter_mut()
@@ -1864,7 +1880,7 @@ mod tests {
             ye: vec![0.2; 10],
         };
         let mut init = [1., 1., 1.];
-        let res = mpfit(l, &mut init, None, &Default::default());
+        let res = mpfit(&l, &mut init, None, &Default::default());
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
@@ -1880,6 +1896,27 @@ mod tests {
             }
             Err(err) => {
                 panic!("Error in Quad fit: {}", err);
+            }
+        }
+        let mut pars = [MPPar::default(), MPPar::default(), MPPar::default()];
+        pars[1].fixed = true;
+        let mut init = [1., 0., 1.];
+        let res = mpfit(&l, &mut init, Some(&pars), &Default::default());
+        match res {
+            Ok(status) => {
+                assert_eq!(status.success, MPSuccess::Chi);
+                assert_eq!(status.n_iter, 3);
+                assert_eq!(status.n_fev, 7);
+                assert_approx_eq!(status.best_norm, 6.98358800);
+                assert_approx_eq!(init[0], 4.69625430);
+                assert_approx_eq!(init[1], 0.00000000);
+                assert_approx_eq!(init[2], 6.17295360);
+                assert_approx_eq!(status.xerror[0], 0.09728581);
+                assert_approx_eq!(status.xerror[1], 0.00000000);
+                assert_approx_eq!(status.xerror[2], 0.05374279);
+            }
+            Err(err) => {
+                panic!("Error in Quad fixed fit: {}", err);
             }
         }
     }
