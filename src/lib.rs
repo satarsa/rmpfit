@@ -355,8 +355,8 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             self.f.eval(&self.xnew, &mut self.wa4)?;
             self.nfev += 1;
             self.xnew[free_p] = temp;
-            for i in 0..self.m {
-                self.fjac[ij] = (self.wa4[i] - self.fvec[i]) / h;
+            for (wa4, fvec) in self.wa4.iter().zip(&self.fvec) {
+                self.fjac[ij] = (*wa4 - *fvec) / h;
                 ij += 1;
             }
         }
