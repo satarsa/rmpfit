@@ -437,13 +437,11 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
     fn qrfac(&mut self) {
         // Compute the QR factorization of the jacobian
         // compute the initial column norms and initialize several arrays.
-        let mut ij = 0;
-        for j in 0..self.nfree {
+        for (j, ij) in (0..self.nfree).zip((0..self.m * self.nfree).step_by(self.m)) {
             self.wa2[j] = self.fjac[ij..ij + self.m].enorm();
             self.wa1[j] = self.wa2[j];
             self.wa3[j] = self.wa1[j];
             self.ipvt[j] = j;
-            ij += self.m;
         }
         // reduce a to r with householder transformations.
         for j in 0..self.m.min(self.nfree) {
@@ -467,7 +465,8 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 self.ipvt.swap(j, kmax);
             }
             let jj = j + self.m * j;
-            let mut ajnorm = self.fjac[jj..self.m - j + jj].enorm();
+            let jjj = self.m - j + jj;
+            let mut ajnorm = self.fjac[jj..jjj].enorm();
             if ajnorm == 0. {
                 self.wa1[j] = -ajnorm;
                 continue;
@@ -475,10 +474,8 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             if self.fjac[jj] < 0. {
                 ajnorm = -ajnorm;
             }
-            ij = jj;
-            for _ in j..self.m {
-                self.fjac[ij] /= ajnorm;
-                ij += 1;
+            for fjac in self.fjac[jj..jjj].iter_mut() {
+                *fjac /= ajnorm;
             }
             self.fjac[jj] += 1.;
             // apply the transformation to the remaining columns
@@ -487,7 +484,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             if jp1 < self.nfree {
                 for k in jp1..self.nfree {
                     let mut sum = 0.;
-                    ij = j + self.m * k;
+                    let mut ij = j + self.m * k;
                     let mut jj = j + self.m * j;
                     for _ in j..self.m {
                         sum += self.fjac[jj] * self.fjac[ij];
@@ -565,6 +562,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
     // Initialize Levenberg-Marquardt parameter and iteration counter
     fn init_lm(&mut self) -> MPResult<()> {
         self.f.eval(self.xall, &mut self.fvec)?;
+        self.nfev += 1;
         self.fnorm = self.fvec.enorm();
         self.orig_norm = self.fnorm * self.fnorm;
         self.xnew.copy_from_slice(self.xall);
@@ -1432,7 +1430,6 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         }
         self.f.eval(&self.xnew, &mut self.wa4)?;
         self.nfev += 1;
-        // TODO: user function may return an error which we have to handle here
         self.fnorm1 = self.wa4[0..self.m].enorm();
         /*
          *	    compute the scaled actual reduction.
@@ -1812,7 +1809,7 @@ mod tests {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
                 assert_eq!(status.n_iter, 3);
-                assert_eq!(status.n_fev, 7);
+                assert_eq!(status.n_fev, 8);
                 assert_approx_eq!(status.best_norm, 2.75628498);
                 assert_approx_eq!(init[0], 3.20996572);
                 assert_approx_eq!(init[1], 1.77095420);
@@ -1885,7 +1882,7 @@ mod tests {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
                 assert_eq!(status.n_iter, 3);
-                assert_eq!(status.n_fev, 9);
+                assert_eq!(status.n_fev, 10);
                 assert_approx_eq!(status.best_norm, 5.67932273);
                 assert_approx_eq!(init[0], 4.70382909);
                 assert_approx_eq!(init[1], 0.06258629);
@@ -1906,7 +1903,7 @@ mod tests {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
                 assert_eq!(status.n_iter, 3);
-                assert_eq!(status.n_fev, 7);
+                assert_eq!(status.n_fev, 8);
                 assert_approx_eq!(status.best_norm, 6.98358800);
                 assert_approx_eq!(init[0], 4.69625430);
                 assert_approx_eq!(init[1], 0.00000000);
@@ -1982,7 +1979,7 @@ mod tests {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
                 assert_eq!(status.n_iter, 27);
-                assert_eq!(status.n_fev, 133);
+                assert_eq!(status.n_fev, 134);
                 assert_approx_eq!(status.best_norm, 10.35003196);
                 assert_approx_eq!(init[0], 0.48044336);
                 assert_approx_eq!(init[1], 4.55075247);
@@ -2011,7 +2008,7 @@ mod tests {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
                 assert_eq!(status.n_iter, 12);
-                assert_eq!(status.n_fev, 34);
+                assert_eq!(status.n_fev, 35);
                 assert_approx_eq!(status.best_norm, 15.51613428);
                 assert_approx_eq!(init[0], 0.00000000);
                 assert_approx_eq!(init[1], 5.05924391);
