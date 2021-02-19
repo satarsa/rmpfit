@@ -1920,4 +1920,111 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn gaussian() {
+        struct Gaussian {
+            x: Vec<f64>,
+            y: Vec<f64>,
+            ye: Vec<f64>,
+        };
+
+        impl MPFitter for &Gaussian {
+            fn eval(&self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
+                let sig2 = params[3] * params[3];
+                for (((d, x), y), ye) in deviates
+                    .iter_mut()
+                    .zip(self.x.iter())
+                    .zip(self.y.iter())
+                    .zip(self.ye.iter())
+                {
+                    let xc = *x - params[2];
+                    let f = params[1] * (-0.5 * xc * xc / sig2).exp() + params[0];
+                    *d = (*y - f) / *ye;
+                }
+                Ok(())
+            }
+
+            fn number_of_points(&self) -> usize {
+                self.x.len()
+            }
+        }
+        let l = Gaussian {
+            x: vec![
+                -1.7237128E+00,
+                1.8712276E+00,
+                -9.6608055E-01,
+                -2.8394297E-01,
+                1.3416969E+00,
+                1.3757038E+00,
+                -1.3703436E+00,
+                4.2581975E-02,
+                -1.4970151E-01,
+                8.2065094E-01,
+            ],
+            y: vec![
+                -4.4494256E-02,
+                8.7324673E-01,
+                7.4443483E-01,
+                4.7631559E+00,
+                1.7187297E-01,
+                1.1639182E-01,
+                1.5646480E+00,
+                5.2322268E+00,
+                4.2543168E+00,
+                6.2792623E-01,
+            ],
+            ye: vec![0.5; 10],
+        };
+        let mut init = [0., 1., 1., 1.];
+        let res = mpfit(&l, &mut init, None, &Default::default());
+        match res {
+            Ok(status) => {
+                assert_eq!(status.success, MPSuccess::Chi);
+                assert_eq!(status.n_iter, 27);
+                assert_eq!(status.n_fev, 133);
+                assert_approx_eq!(status.best_norm, 10.35003196);
+                assert_approx_eq!(init[0], 0.48044336);
+                assert_approx_eq!(init[1], 4.55075247);
+                assert_approx_eq!(init[2], -0.06256246);
+                assert_approx_eq!(init[3], 0.39747174);
+                assert_approx_eq!(status.xerror[0], 0.23223493);
+                assert_approx_eq!(status.xerror[1], 0.39543448);
+                assert_approx_eq!(status.xerror[2], 0.07471491);
+                assert_approx_eq!(status.xerror[3], 0.08999568);
+            }
+            Err(err) => {
+                panic!("Error in Quad fit: {}", err);
+            }
+        }
+        let mut init = [0., 1., 0., 0.1];
+        let mut pars = [
+            MPPar::default(),
+            MPPar::default(),
+            MPPar::default(),
+            MPPar::default(),
+        ];
+        pars[0].fixed = true;
+        pars[2].fixed = true;
+        let res = mpfit(&l, &mut init, Some(&pars), &Default::default());
+        match res {
+            Ok(status) => {
+                assert_eq!(status.success, MPSuccess::Chi);
+                assert_eq!(status.n_iter, 12);
+                assert_eq!(status.n_fev, 34);
+                assert_approx_eq!(status.best_norm, 15.51613428);
+                assert_approx_eq!(init[0], 0.00000000);
+                assert_approx_eq!(init[1], 5.05924391);
+                assert_approx_eq!(init[2], 0.00000000);
+                assert_approx_eq!(init[3], 0.47974647);
+                assert_approx_eq!(status.xerror[0], 0.00000000);
+                assert_approx_eq!(status.xerror[1], 0.32930696);
+                assert_approx_eq!(status.xerror[2], 0.00000000);
+                assert_approx_eq!(status.xerror[3], 0.05380360);
+            }
+            Err(err) => {
+                panic!("Error in Quad fit: {}", err);
+            }
+        }
+    }
 }
