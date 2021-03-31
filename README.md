@@ -53,7 +53,7 @@ impl MPFitter for Linear {
         }
         Ok(())
     }
-
+    
     fn number_of_points(&self) -> usize {
         self.x.len()
     }
@@ -89,7 +89,7 @@ fn main() {
     };
     // initializing input parameters
     let mut init = [1., 1.];
-    let res = mpfit(&l, &mut init, None, &Default::default()).unwrap();
+    let res = l.mpfit(&mut init, None, &Default::default()).unwrap();
     // actual 3.2
     assert_approx_eq!(init[0], 3.20996572);
     assert_approx_eq!(status.xerror[0], 0.02221018);
