@@ -82,7 +82,7 @@
 //!     };
 //!     // initializing input parameters
 //! let mut init = [1., 1.];
-//! let res = mpfit(&l, &mut init, None, &Default::default()).unwrap();
+//! let res = l.mpfit(&mut init, None, &Default::default()).unwrap();
 //! assert_approx_eq!(init[0], 3.20996572); // actual 3.2
 //! assert_approx_eq!(status.xerror[0], 0.02221018);
 //! assert_approx_eq!(init[1], 1.77095420); // actual 1.78
@@ -269,8 +269,60 @@ pub trait MPFitter {
     /// The residuals are defined as ```(y[i] - f(x[i]))/y_error[i]```.
     fn eval(&self, params: &[f64], deviates: &mut [f64]) -> MPResult<()>;
 
-    /// Number of the data points in user private data.
+    /// Number of the data points in the user private data.
     fn number_of_points(&self) -> usize;
+
+    /// Main function to refine the parameters.
+    /// # Arguments
+    /// * `xall` - A mutable slice with starting fit parameters
+    /// * `params` - A possible slice with parameter configurations
+    /// * `config` - ```MPConifg``` to configure the fit
+    fn mpfit(
+        &self,
+        xall: &mut [f64],
+        params: Option<&[MPPar]>,
+        config: &MPConfig,
+    ) -> MPResult<MPStatus>
+    where
+        Self: Sized,
+    {
+        let mut fit = MPFit::new(self, xall, config)?;
+        fit.check_config()?;
+        fit.parse_params(params)?;
+        fit.init_lm()?;
+        loop {
+            fit.fill_xnew();
+            fit.fdjac2()?;
+            fit.check_limits();
+            fit.qrfac();
+            fit.scale();
+            fit.transpose();
+            if !fit.check_is_finite() {
+                return Err(MPError::Nan);
+            }
+            let gnorm = fit.gnorm();
+            if gnorm <= config.gtol {
+                fit.info = MPSuccess::Dir;
+            }
+            if fit.info != MPSuccess::NotDone {
+                return fit.terminate(params);
+            }
+            if config.max_iter == 0 {
+                fit.info = MPSuccess::MaxIter;
+                return fit.terminate(params);
+            }
+            fit.rescale();
+            loop {
+                fit.lmpar();
+                let res = fit.iterate(gnorm)?;
+                match res {
+                    MPDone::Exit => return fit.terminate(params),
+                    MPDone::Inner => continue,
+                    MPDone::Outer => break,
+                }
+            }
+        }
+    }
 }
 
 /// (f64::MIN_POSITIVE * 1.5).sqrt() * 10
@@ -1689,56 +1741,6 @@ enum MPDone {
     Outer,
 }
 
-/// Main function to refine the parameters.
-/// # Arguments
-/// * `f` - A reference to a user struct which implements trait ```MPFitter```
-/// * `xall` - A mutable slice with starting fit parameters
-/// * `params` - A possible slice with parameter configurations
-/// * `config` - ```MPConifg``` to configure the fit
-pub fn mpfit<T: MPFitter>(
-    f: &T,
-    xall: &mut [f64],
-    params: Option<&[MPPar]>,
-    config: &MPConfig,
-) -> MPResult<MPStatus> {
-    let mut fit = MPFit::new(f, xall, config)?;
-    fit.check_config()?;
-    fit.parse_params(params)?;
-    fit.init_lm()?;
-    loop {
-        fit.fill_xnew();
-        fit.fdjac2()?;
-        fit.check_limits();
-        fit.qrfac();
-        fit.scale();
-        fit.transpose();
-        if !fit.check_is_finite() {
-            return Err(MPError::Nan);
-        }
-        let gnorm = fit.gnorm();
-        if gnorm <= config.gtol {
-            fit.info = MPSuccess::Dir;
-        }
-        if fit.info != MPSuccess::NotDone {
-            return fit.terminate(params);
-        }
-        if config.max_iter == 0 {
-            fit.info = MPSuccess::MaxIter;
-            return fit.terminate(params);
-        }
-        fit.rescale();
-        loop {
-            fit.lmpar();
-            let res = fit.iterate(gnorm)?;
-            match res {
-                MPDone::Exit => return fit.terminate(params),
-                MPDone::Inner => continue,
-                MPDone::Outer => break,
-            }
-        }
-    }
-}
-
 ///    function enorm
 ///
 ///    given an n-vector x, this function calculates the
@@ -1863,7 +1865,7 @@ impl fmt::Display for MPSuccess {
 
 #[cfg(test)]
 mod tests {
-    use crate::{mpfit, MPFitter, MPPar, MPResult, MPSuccess};
+    use crate::{MPFitter, MPPar, MPResult, MPSuccess};
     use assert_approx_eq::assert_approx_eq;
     use std::f64::consts::{LN_2, PI};
 
@@ -1873,7 +1875,7 @@ mod tests {
             x: Vec<f64>,
             y: Vec<f64>,
             ye: Vec<f64>,
-        };
+        }
 
         impl MPFitter for Linear {
             fn eval(&self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
@@ -1921,7 +1923,7 @@ mod tests {
             ye: vec![0.07; 10],
         };
         let mut init = [1., 1.];
-        let res = mpfit(&l, &mut init, None, &Default::default());
+        let res = l.mpfit(&mut init, None, &Default::default());
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
@@ -1945,7 +1947,7 @@ mod tests {
             x: Vec<f64>,
             y: Vec<f64>,
             ye: Vec<f64>,
-        };
+        }
 
         impl MPFitter for Quad {
             fn eval(&self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
@@ -1994,7 +1996,7 @@ mod tests {
             ye: vec![0.2; 10],
         };
         let mut init = [1., 1., 1.];
-        let res = mpfit(&l, &mut init, None, &Default::default());
+        let res = l.mpfit(&mut init, None, &Default::default());
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
@@ -2015,7 +2017,7 @@ mod tests {
         let mut pars = [MPPar::default(), MPPar::default(), MPPar::default()];
         pars[1].fixed = true;
         let mut init = [1., 0., 1.];
-        let res = mpfit(&l, &mut init, Some(&pars), &Default::default());
+        let res = l.mpfit(&mut init, Some(&pars), &Default::default());
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
@@ -2041,7 +2043,7 @@ mod tests {
             x: Vec<f64>,
             y: Vec<f64>,
             ye: Vec<f64>,
-        };
+        }
 
         impl MPFitter for Gaussian {
             fn eval(&self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
@@ -2091,7 +2093,7 @@ mod tests {
             ye: vec![0.5; 10],
         };
         let mut init = [0., 1., 1., 1.];
-        let res = mpfit(&l, &mut init, None, &Default::default());
+        let res = l.mpfit(&mut init, None, &Default::default());
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
@@ -2120,7 +2122,7 @@ mod tests {
         ];
         pars[0].fixed = true;
         pars[2].fixed = true;
-        let res = mpfit(&l, &mut init, Some(&pars), &Default::default());
+        let res = l.mpfit(&mut init, Some(&pars), &Default::default());
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
@@ -2168,7 +2170,7 @@ mod tests {
             x: Vec<f64>,
             y: Vec<f64>,
             ye: Vec<f64>,
-        };
+        }
 
         impl MPFitter for Psevdovoigt {
             fn eval(&self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
@@ -2423,7 +2425,7 @@ mod tests {
                 rel_step: 0.0,
             },
         ];
-        let res = mpfit(&l, &mut init, Some(&fixes), &Default::default());
+        let res = l.mpfit(&mut init, Some(&fixes), &Default::default());
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
