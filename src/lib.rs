@@ -26,6 +26,7 @@
 //! # Usage Example
 //! A user should implement trait ```MPFitter``` for its struct:
 //! ```
+//! use assert_approx_eq::assert_approx_eq;
 //! use rmpfit::{MPFitter, MPResult, mpfit};
 //!
 //! struct Linear {
@@ -126,7 +127,7 @@ pub struct MPPar {
     pub rel_step: f64,
 }
 
-impl ::std::default::Default for MPPar {
+impl Default for MPPar {
     fn default() -> Self {
         MPPar {
             fixed: false,
@@ -172,7 +173,7 @@ pub struct MPConfig {
     pub no_finite_check: bool,
 }
 
-impl ::std::default::Default for MPConfig {
+impl Default for MPConfig {
     fn default() -> Self {
         MPConfig {
             ftol: 1e-10,
