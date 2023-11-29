@@ -54,7 +54,8 @@
 //!         }
 //!     }
 //!
-//! let mut l = Linear {
+//! fn main() {
+//!     let mut l = Linear {
 //!         x: vec![
 //!                 -1.7237128E+00,
 //!                 1.8712276E+00,
@@ -82,12 +83,13 @@
 //!         ye: vec![0.07; 10],
 //!     };
 //!     // initializing input parameters
-//! let mut init = [1., 1.];
-//! let res = l.mpfit(&mut init).unwrap();
-//! assert_approx_eq!(init[0], 3.20996572); // actual 3.2
-//! assert_approx_eq!(status.xerror[0], 0.02221018);
-//! assert_approx_eq!(init[1], 1.77095420); // actual 1.78
-//! assert_approx_eq!(status.xerror[1], 0.01893756);
+//!    let mut init = [1., 1.];
+//!    let res = l.mpfit(&mut init).unwrap();
+//!    assert_approx_eq!(init[0], 3.20996572); // actual 3.2
+//!    assert_approx_eq!(status.xerror[0], 0.02221018);
+//!    assert_approx_eq!(init[1], 1.77095420); // actual 1.78
+//!    assert_approx_eq!(status.xerror[1], 0.01893756);
+//! }
 //! ```
 //! then ```init``` will contain the refined parameters of the fitting function.
 //! If user function fails to calculate residuals, it should return ```MPError::Eval```.
