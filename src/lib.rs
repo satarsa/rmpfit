@@ -27,7 +27,7 @@
 //! A user should implement trait ```MPFitter``` for its struct:
 //! ```
 //! use assert_approx_eq::assert_approx_eq;
-//! use rmpfit::{MPFitter, MPResult, mpfit};
+//! use rmpfit::{MPFitter, MPResult};
 //!
 //! struct Linear {
 //!     x: Vec<f64>,
