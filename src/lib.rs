@@ -83,7 +83,7 @@
 //!     };
 //!     // initializing input parameters
 //! let mut init = [1., 1.];
-//! let res = l.mpfit(&mut init, None).unwrap();
+//! let res = l.mpfit(&mut init).unwrap();
 //! assert_approx_eq!(init[0], 3.20996572); // actual 3.2
 //! assert_approx_eq!(status.xerror[0], 0.02221018);
 //! assert_approx_eq!(init[1], 1.77095420); // actual 1.78
@@ -279,19 +279,23 @@ pub trait MPFitter {
         MPConfig::default()
     }
 
+    /// Parameters for fitted values
+    /// User must reimplement this method if the custom parameters are needed
+    fn parameters(&self) -> Option<&[MPPar]> {
+        None
+    }
+
     /// Main function to refine the parameters.
     /// # Arguments
     /// * `xall` - A mutable slice with starting fit parameters
-    /// * `params` - A possible slice with parameter configurations
-    /// * `config` - ```MPConifg``` to configure the fit
-    fn mpfit(&mut self, xall: &mut [f64], params: Option<&[MPPar]>) -> MPResult<MPStatus>
+    fn mpfit(&mut self, xall: &mut [f64]) -> MPResult<MPStatus>
     where
         Self: Sized,
     {
         let config = self.config();
         let mut fit = MPFit::new(self, xall, &config)?;
         fit.check_config()?;
-        fit.parse_params(params)?;
+        fit.parse_params()?;
         fit.init_lm()?;
         loop {
             fit.fill_xnew();
@@ -308,18 +312,18 @@ pub trait MPFitter {
                 fit.info = MPSuccess::Dir;
             }
             if fit.info != MPSuccess::NotDone {
-                return fit.terminate(params);
+                return fit.terminate();
             }
             if config.max_iter == 0 {
                 fit.info = MPSuccess::MaxIter;
-                return fit.terminate(params);
+                return fit.terminate();
             }
             fit.rescale();
             loop {
                 fit.lmpar();
                 let res = fit.iterate(gnorm)?;
                 match res {
-                    MPDone::Exit => return fit.terminate(params),
+                    MPDone::Exit => return fit.terminate(),
                     MPDone::Inner => continue,
                     MPDone::Outer => break,
                 }
@@ -681,8 +685,8 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         }
     }
 
-    fn parse_params(&mut self, params: Option<&[MPPar]>) -> MPResult<()> {
-        match &params {
+    fn parse_params(&mut self) -> MPResult<()> {
+        match &self.f.parameters() {
             None => {
                 self.nfree = self.npar;
                 self.ifree = (0..self.npar).collect();
@@ -861,12 +865,12 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         gnorm
     }
 
-    fn terminate(mut self, params: Option<&[MPPar]>) -> MPResult<MPStatus> {
+    fn terminate(mut self) -> MPResult<MPStatus> {
         for i in 0..self.nfree {
             self.xall[self.ifree[i]] = self.x[i];
         }
         /* Compute number of pegged parameters */
-        let n_pegged = match params {
+        let n_pegged = match self.f.parameters() {
             None => 0,
             Some(params) => {
                 let mut n_pegged = 0;
@@ -1926,7 +1930,7 @@ mod tests {
             ye: vec![0.07; 10],
         };
         let mut init = [1., 1.];
-        let res = l.mpfit(&mut init, None);
+        let res = l.mpfit(&mut init);
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
@@ -1950,6 +1954,7 @@ mod tests {
             x: Vec<f64>,
             y: Vec<f64>,
             ye: Vec<f64>,
+            params: Option<[MPPar; 3]>,
         }
 
         impl MPFitter for Quad {
@@ -1969,6 +1974,13 @@ mod tests {
 
             fn number_of_points(&self) -> usize {
                 self.x.len()
+            }
+
+            fn parameters(&self) -> Option<&[MPPar]> {
+                match &self.params {
+                    None => None,
+                    Some(p) => Some(p),
+                }
             }
         }
         let mut l = Quad {
@@ -1997,9 +2009,10 @@ mod tests {
                 8.7348375E+00,
             ],
             ye: vec![0.2; 10],
+            params: None,
         };
         let mut init = [1., 1., 1.];
-        let res = l.mpfit(&mut init, None);
+        let res = l.mpfit(&mut init);
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
@@ -2017,10 +2030,21 @@ mod tests {
                 panic!("Error in Quad fit: {}", err);
             }
         }
-        let mut pars = [MPPar::default(), MPPar::default(), MPPar::default()];
-        pars[1].fixed = true;
+        l.params = Some([
+            MPPar::default(),
+            MPPar {
+                fixed: true,
+                limited_low: false,
+                limited_up: false,
+                limit_low: 0.0,
+                limit_up: 0.0,
+                step: 0.0,
+                rel_step: 0.0,
+            },
+            MPPar::default(),
+        ]);
         let mut init = [1., 0., 1.];
-        let res = l.mpfit(&mut init, Some(&pars));
+        let res = l.mpfit(&mut init);
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
@@ -2046,6 +2070,7 @@ mod tests {
             x: Vec<f64>,
             y: Vec<f64>,
             ye: Vec<f64>,
+            pars: Option<[MPPar; 4]>,
         }
 
         impl MPFitter for Gaussian {
@@ -2066,6 +2091,13 @@ mod tests {
 
             fn number_of_points(&self) -> usize {
                 self.x.len()
+            }
+
+            fn parameters(&self) -> Option<&[MPPar]> {
+                match &self.pars {
+                    None => None,
+                    Some(p) => Some(p),
+                }
             }
         }
         let mut l = Gaussian {
@@ -2094,9 +2126,10 @@ mod tests {
                 6.2792623E-01,
             ],
             ye: vec![0.5; 10],
+            pars: None,
         };
         let mut init = [0., 1., 1., 1.];
-        let res = l.mpfit(&mut init, None);
+        let res = l.mpfit(&mut init);
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
@@ -2117,15 +2150,29 @@ mod tests {
             }
         }
         let mut init = [0., 1., 0., 0.1];
-        let mut pars = [
+        l.pars = Some([
+            MPPar {
+                fixed: true,
+                limited_low: false,
+                limited_up: false,
+                limit_low: 0.0,
+                limit_up: 0.0,
+                step: 0.0,
+                rel_step: 0.0,
+            },
             MPPar::default(),
+            MPPar {
+                fixed: true,
+                limited_low: false,
+                limited_up: false,
+                limit_low: 0.0,
+                limit_up: 0.0,
+                step: 0.0,
+                rel_step: 0.0,
+            },
             MPPar::default(),
-            MPPar::default(),
-            MPPar::default(),
-        ];
-        pars[0].fixed = true;
-        pars[2].fixed = true;
-        let res = l.mpfit(&mut init, Some(&pars));
+        ]);
+        let res = l.mpfit(&mut init);
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
@@ -2173,6 +2220,7 @@ mod tests {
             x: Vec<f64>,
             y: Vec<f64>,
             ye: Vec<f64>,
+            pars: [MPPar; 5],
         }
 
         impl MPFitter for Psevdovoigt {
@@ -2195,6 +2243,10 @@ mod tests {
 
             fn number_of_points(&self) -> usize {
                 self.x.len()
+            }
+
+            fn parameters(&self) -> Option<&[MPPar]> {
+                Some(&self.pars)
             }
         }
         let mut l = Psevdovoigt {
@@ -2405,6 +2457,21 @@ mod tests {
                 0.872356022121994,
                 0.8711681408643424,
             ],
+            pars: [
+                MPPar::default(),
+                MPPar::default(),
+                MPPar::default(),
+                MPPar::default(),
+                MPPar {
+                    fixed: false,
+                    limited_low: true,
+                    limited_up: true,
+                    limit_low: 0.0,
+                    limit_up: 1.0,
+                    step: 0.0,
+                    rel_step: 0.0,
+                },
+            ],
         };
         let mut init = [
             45.98749603354855,
@@ -2413,22 +2480,7 @@ mod tests {
             781.8478754078232,
             0.5,
         ];
-        let fixes = [
-            MPPar::default(),
-            MPPar::default(),
-            MPPar::default(),
-            MPPar::default(),
-            MPPar {
-                fixed: false,
-                limited_low: true,
-                limited_up: true,
-                limit_low: 0.0,
-                limit_up: 1.0,
-                step: 0.0,
-                rel_step: 0.0,
-            },
-        ];
-        let res = l.mpfit(&mut init, Some(&fixes));
+        let res = l.mpfit(&mut init);
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
