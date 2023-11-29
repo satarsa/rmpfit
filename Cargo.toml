@@ -1,6 +1,6 @@
 [package]
 name = "rmpfit"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Vadim Dyadkin <dyadkin@3lp.cx>"]
 edition = "2021"
 description = "Pure Rust implementation of the CMPFIT library"
