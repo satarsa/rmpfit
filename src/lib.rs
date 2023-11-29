@@ -83,7 +83,7 @@
 //!     };
 //!     // initializing input parameters
 //! let mut init = [1., 1.];
-//! let res = l.mpfit(&mut init, None, &Default::default()).unwrap();
+//! let res = l.mpfit(&mut init, None).unwrap();
 //! assert_approx_eq!(init[0], 3.20996572); // actual 3.2
 //! assert_approx_eq!(status.xerror[0], 0.02221018);
 //! assert_approx_eq!(init[1], 1.77095420); // actual 1.78
@@ -273,21 +273,23 @@ pub trait MPFitter {
     /// Number of the data points in the user private data.
     fn number_of_points(&self) -> usize;
 
+    /// Returns a default config
+    /// It should be reimplemented if user needs a custom config
+    fn config(&self) -> MPConfig {
+        MPConfig::default()
+    }
+
     /// Main function to refine the parameters.
     /// # Arguments
     /// * `xall` - A mutable slice with starting fit parameters
     /// * `params` - A possible slice with parameter configurations
     /// * `config` - ```MPConifg``` to configure the fit
-    fn mpfit(
-        &mut self,
-        xall: &mut [f64],
-        params: Option<&[MPPar]>,
-        config: &MPConfig,
-    ) -> MPResult<MPStatus>
+    fn mpfit(&mut self, xall: &mut [f64], params: Option<&[MPPar]>) -> MPResult<MPStatus>
     where
         Self: Sized,
     {
-        let mut fit = MPFit::new(self, xall, config)?;
+        let config = self.config();
+        let mut fit = MPFit::new(self, xall, &config)?;
         fit.check_config()?;
         fit.parse_params(params)?;
         fit.init_lm()?;
@@ -1924,7 +1926,7 @@ mod tests {
             ye: vec![0.07; 10],
         };
         let mut init = [1., 1.];
-        let res = l.mpfit(&mut init, None, &Default::default());
+        let res = l.mpfit(&mut init, None);
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
@@ -1997,7 +1999,7 @@ mod tests {
             ye: vec![0.2; 10],
         };
         let mut init = [1., 1., 1.];
-        let res = l.mpfit(&mut init, None, &Default::default());
+        let res = l.mpfit(&mut init, None);
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
@@ -2018,7 +2020,7 @@ mod tests {
         let mut pars = [MPPar::default(), MPPar::default(), MPPar::default()];
         pars[1].fixed = true;
         let mut init = [1., 0., 1.];
-        let res = l.mpfit(&mut init, Some(&pars), &Default::default());
+        let res = l.mpfit(&mut init, Some(&pars));
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
@@ -2094,7 +2096,7 @@ mod tests {
             ye: vec![0.5; 10],
         };
         let mut init = [0., 1., 1., 1.];
-        let res = l.mpfit(&mut init, None, &Default::default());
+        let res = l.mpfit(&mut init, None);
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
@@ -2123,7 +2125,7 @@ mod tests {
         ];
         pars[0].fixed = true;
         pars[2].fixed = true;
-        let res = l.mpfit(&mut init, Some(&pars), &Default::default());
+        let res = l.mpfit(&mut init, Some(&pars));
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
@@ -2426,7 +2428,7 @@ mod tests {
                 rel_step: 0.0,
             },
         ];
-        let res = l.mpfit(&mut init, Some(&fixes), &Default::default());
+        let res = l.mpfit(&mut init, Some(&fixes));
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
