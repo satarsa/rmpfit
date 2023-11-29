@@ -36,7 +36,7 @@
 //! }
 //!
 //! impl MPFitter for Linear {
-//!     fn eval(&self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
+//!     fn eval(&mut self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
 //!         for (((d, x), y), ye) in deviates
 //!             .iter_mut()
 //!             .zip(self.x.iter())
@@ -54,7 +54,7 @@
 //!         }
 //!     }
 //!
-//! let l = Linear {
+//! let mut l = Linear {
 //!         x: vec![
 //!                 -1.7237128E+00,
 //!                 1.8712276E+00,
@@ -268,7 +268,7 @@ pub trait MPFitter {
     /// using parameters from ```params``` and any user data that are required, and fill
     /// the ```deviates``` slice.
     /// The residuals are defined as ```(y[i] - f(x[i]))/y_error[i]```.
-    fn eval(&self, params: &[f64], deviates: &mut [f64]) -> MPResult<()>;
+    fn eval(&mut self, params: &[f64], deviates: &mut [f64]) -> MPResult<()>;
 
     /// Number of the data points in the user private data.
     fn number_of_points(&self) -> usize;
@@ -279,7 +279,7 @@ pub trait MPFitter {
     /// * `params` - A possible slice with parameter configurations
     /// * `config` - ```MPConifg``` to configure the fit
     fn mpfit(
-        &self,
+        &mut self,
         xall: &mut [f64],
         params: Option<&[MPPar]>,
         config: &MPConfig,
@@ -351,7 +351,7 @@ struct MPFit<'a, T: MPFitter> {
     llim: Vec<f64>,
     ulim: Vec<f64>,
     qanylim: bool,
-    f: &'a T,
+    f: &'a mut T,
     wa1: Vec<f64>,
     wa2: Vec<f64>,
     wa3: Vec<f64>,
@@ -370,7 +370,7 @@ struct MPFit<'a, T: MPFitter> {
 }
 
 impl<'a, F: MPFitter> MPFit<'a, F> {
-    fn new(f: &'a F, xall: &'a mut [f64], cfg: &'a MPConfig) -> MPResult<MPFit<'a, F>> {
+    fn new(f: &'a mut F, xall: &'a mut [f64], cfg: &'a MPConfig) -> MPResult<MPFit<'a, F>> {
         let m = f.number_of_points();
         let npar = xall.len();
         if m == 0 {
@@ -1879,7 +1879,7 @@ mod tests {
         }
 
         impl MPFitter for Linear {
-            fn eval(&self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
+            fn eval(&mut self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
                 for (((d, x), y), ye) in deviates
                     .iter_mut()
                     .zip(self.x.iter())
@@ -1896,7 +1896,7 @@ mod tests {
                 self.x.len()
             }
         }
-        let l = Linear {
+        let mut l = Linear {
             x: vec![
                 -1.7237128E+00,
                 1.8712276E+00,
@@ -1951,7 +1951,7 @@ mod tests {
         }
 
         impl MPFitter for Quad {
-            fn eval(&self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
+            fn eval(&mut self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
                 for (((d, x), y), ye) in deviates
                     .iter_mut()
                     .zip(self.x.iter())
@@ -1969,7 +1969,7 @@ mod tests {
                 self.x.len()
             }
         }
-        let l = Quad {
+        let mut l = Quad {
             x: vec![
                 -1.7237128E+00,
                 1.8712276E+00,
@@ -2047,7 +2047,7 @@ mod tests {
         }
 
         impl MPFitter for Gaussian {
-            fn eval(&self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
+            fn eval(&mut self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
                 let sig2 = params[3] * params[3];
                 for (((d, x), y), ye) in deviates
                     .iter_mut()
@@ -2066,7 +2066,7 @@ mod tests {
                 self.x.len()
             }
         }
-        let l = Gaussian {
+        let mut l = Gaussian {
             x: vec![
                 -1.7237128E+00,
                 1.8712276E+00,
@@ -2174,7 +2174,7 @@ mod tests {
         }
 
         impl MPFitter for Psevdovoigt {
-            fn eval(&self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
+            fn eval(&mut self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
                 for (((d, x), y), ye) in deviates
                     .iter_mut()
                     .zip(self.x.iter())
@@ -2195,7 +2195,7 @@ mod tests {
                 self.x.len()
             }
         }
-        let l = Psevdovoigt {
+        let mut l = Psevdovoigt {
             x: vec![
                 45.48130544450339,
                 45.49617104593113,
