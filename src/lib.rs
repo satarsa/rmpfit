@@ -275,14 +275,14 @@ pub trait MPFitter {
     /// Number of the data points in the user private data.
     fn number_of_points(&self) -> usize;
 
-    /// Returns a default config
-    /// It should be reimplemented if user needs a custom config
+    /// Returns a default config.
+    /// It should be reimplemented if user needs a custom config.
     fn config(&self) -> MPConfig {
         MPConfig::default()
     }
 
-    /// Parameters for fitted values
-    /// User must reimplement this method if the custom parameters are needed
+    /// Parameters for fitted values.
+    /// User must reimplement this method if the custom parameters are needed.
     fn parameters(&self) -> Option<&[MPPar]> {
         None
     }
