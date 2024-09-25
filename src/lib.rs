@@ -86,9 +86,9 @@
 //!    let mut init = [1., 1.];
 //!    let res = l.mpfit(&mut init).unwrap();
 //!    assert_approx_eq!(init[0], 3.20996572); // actual 3.2
-//!    assert_approx_eq!(status.xerror[0], 0.02221018);
+//!    assert_approx_eq!(res.xerror[0], 0.02221018);
 //!    assert_approx_eq!(init[1], 1.77095420); // actual 1.78
-//!    assert_approx_eq!(status.xerror[1], 0.01893756);
+//!    assert_approx_eq!(res.xerror[1], 0.01893756);
 //! }
 //! ```
 //! then ```init``` will contain the refined parameters of the fitting function.
@@ -213,7 +213,7 @@ pub enum MPError {
 }
 
 /// Potential success status
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq)]
 pub enum MPSuccess {
     /// Not finished iterations
     NotDone,
@@ -1852,6 +1852,12 @@ impl fmt::Display for MPError {
     }
 }
 
+impl fmt::Debug for MPError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
 impl fmt::Display for MPSuccess {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
@@ -1869,6 +1875,12 @@ impl fmt::Display for MPSuccess {
                 MPSuccess::Gtol => "gtol is too small; no further improvement",
             }
         )
+    }
+}
+
+impl fmt::Debug for MPSuccess {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, f)
     }
 }
 
