@@ -2782,25 +2782,25 @@ mod tests {
             ],
         };
         let mut init = [
-            53.6012949851,
-            0.3145749091,
-            1370.8783084756,
-            175.8877101935,
-            0.5000000000,
+            53.601294985133244,
+            0.31457490908876717,
+            1370.8783084755592,
+            175.88771019349505,
+            0.5,
         ];
         let res = l.mpfit(&mut init);
         match res {
             Ok(status) => {
-                assert_approx_eq!(init[0], 53.605030);
-                assert_approx_eq!(init[1], 0.081201);
-                assert_approx_eq!(init[2], 115.080916);
-                assert_approx_eq!(init[3], 177.801262);
-                assert_approx_eq!(init[4], 0.148976);
+                assert_approx_eq!(init[0], 53.605029);
+                assert_approx_eq!(init[1], 0.081662);
+                assert_approx_eq!(init[2], 105.675544);
+                assert_approx_eq!(init[3], 178.305680);
+                assert_approx_eq!(init[4], 0.113177);
                 assert_approx_eq!(status.xerror[0], 0.000018);
-                assert_approx_eq!(status.xerror[1], 0.000051);
-                assert_approx_eq!(status.xerror[2], 0.242653);
-                assert_approx_eq!(status.xerror[3], 0.085163);
-                assert_approx_eq!(status.xerror[4], 0.002444);
+                assert_approx_eq!(status.xerror[1], 0.000046);
+                assert_approx_eq!(status.xerror[2], 0.081090);
+                assert_approx_eq!(status.xerror[3], 0.079527);
+                assert_approx_eq!(status.xerror[4], 0.002053);
             }
             Err(err) => {
                 panic!("Error in Pseudovoigt fit: {}", err);
