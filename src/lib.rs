@@ -700,34 +700,40 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 self.ifree = (0..self.npar).collect();
             }
             Some(pars) => {
-                if pars.len() == 0 {
+                if pars.is_empty() {
                     return Err(MPError::Empty);
                 }
-                for (i, p) in pars.iter().enumerate() {
-                    if p.fixed {
-                        if self.xall[i] < p.limit_low || self.xall[i] > p.limit_up {
-                            return Err(MPError::Bounds);
-                        }
-                    } else {
-                        if p.limited_low && p.limited_up && p.limit_low >= p.limit_up {
-                            return Err(MPError::Bounds);
-                        }
+                pars.iter().enumerate().for_each(|(i, p)| {
+                    if !p.fixed {
                         self.nfree += 1;
                         self.ifree.push(i);
-                        self.qllim.push(p.limited_low);
-                        self.qulim.push(p.limited_up);
-                        self.llim.push(p.limit_low);
-                        self.ulim.push(p.limit_up);
-                        if p.limited_low || p.limited_up {
-                            self.qanylim = true;
-                        }
                     }
-                    self.step.push(p.step);
-                    self.dstep.push(p.rel_step);
-                }
+                });
                 if self.nfree == 0 {
                     return Err(MPError::NoFree);
                 }
+                for (i, p) in pars.iter().enumerate() {
+                    if (p.limited_low && (self.xall[i] < p.limit_low))
+                        || (p.limited_up && (self.xall[i] > p.limit_up))
+                    {
+                        return Err(MPError::InitBounds);
+                    }
+                    if !p.fixed && p.limited_low && p.limited_up && p.limit_low >= p.limit_up {
+                        return Err(MPError::Bounds);
+                    }
+                }
+                self.ifree.iter().for_each(|i| {
+                    let p = &pars[*i];
+                    self.qllim.push(p.limited_low);
+                    self.qulim.push(p.limited_up);
+                    self.llim.push(p.limit_low);
+                    self.ulim.push(p.limit_up);
+                    if p.limited_low || p.limited_up {
+                        self.qanylim = true;
+                    }
+                    self.step.push(p.step);
+                    self.dstep.push(p.rel_step);
+                });
             }
         };
         if self.m < self.nfree {
