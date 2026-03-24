@@ -8,7 +8,7 @@
 //!
 //! Just a few obvious Rust-specific optimizations are done:
 //! * Removing ```goto``` (fuf).
-//! * Standart Rust Result as result.
+//! * Standard Rust Result as result.
 //! * A few loops are zipped to help the compiler optimize the code
 //!     (no performance tests are done anyway).
 //! * Using trait ```MPFitter``` to call the user code.
@@ -244,7 +244,6 @@ impl Default for MPConfig {
         Self::new()
     }
 }
-
 
 /// MPFIT error status
 pub enum MPError {
