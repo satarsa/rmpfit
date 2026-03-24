@@ -348,13 +348,13 @@ pub trait MPFitter {
     /// This method is called once per Jacobian evaluation whenever at least
     /// one free parameter has [`MPSide::User`] set (or has `deriv_debug`
     /// enabled). The default implementation returns [`MPError::Eval`], which
-    /// causes the fit to abort – override it when you set any parameter's
+    /// causes the fit to abort - override it when you set any parameter's
     /// `side` to [`MPSide::User`].
     ///
     /// # Arguments
-    /// * `params`   – current values of *all* parameters (length = `npar`).
-    /// * `deviates` – output residuals (same as [`MPFitter::eval`]).
-    /// * `derivs`   – per-parameter derivative columns, length = `npar`.
+    /// * `params`   - current values of *all* parameters (length = `npar`).
+    /// * `deviates` - output residuals (same as [`MPFitter::eval`]).
+    /// * `derivs`   - per-parameter derivative columns, length = `npar`.
     ///   - `derivs[i]` is `Some(col)` when parameter `i` needs an analytical
     ///     derivative; `col` has length `m` (number of residuals). Fill
     ///     `col[k]` with `ddeviates[k] / dparams[i]`.
