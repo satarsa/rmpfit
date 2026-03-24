@@ -6,7 +6,7 @@
 //! The original CMPFIT tests (Linear (free parameters), Quad (free and fixed parameters),
 //! and Gaussian (free and fixed parameters) function) are reproduced and passed.
 //!
-//! Just a few obvoius Rust-specific optimizations are done:
+//! Just a few obvious Rust-specific optimizations are done:
 //! * Removing ```goto``` (fuf).
 //! * Standart Rust Result as result.
 //! * A few loops are zipped to help the compiler optimize the code
@@ -19,9 +19,8 @@
 //! * No external dependencies
 //!     ([assert_approx_eq](https://docs.rs/assert_approx_eq/) just for testing).
 //! * Internal Jacobian calculations.
-//!
-//! # Disadvantages
-//! * Sided, analitical or user provided derivates are not implemented.
+//! * Sided, analytical or user provided derivatives are also implemented.
+//! * Derivative debug mode (comparing analytical vs numerical) prints to stderr (as in cmpfit).
 //!
 //! # Usage Example
 //! A user should implement trait ```MPFitter``` for its struct:
@@ -100,6 +99,25 @@ use std::fmt::Formatter;
 /// MPFIT return result
 pub type MPResult<T> = Result<T, MPError>;
 
+/// Controls how numerical derivatives are computed for a parameter, or whether
+/// analytical (user-supplied) derivatives are used instead.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum MPSide {
+    /// One-sided derivative computed automatically: direction chosen to stay
+    /// within parameter bounds (default).
+    #[default]
+    Auto,
+    /// One-sided forward derivative: `(f(x+h) - f(x)) / h`
+    Right,
+    /// One-sided backward derivative: `(f(x) - f(x-h)) / h`
+    Left,
+    /// Two-sided (central difference) derivative: `(f(x+h) - f(x-h)) / (2h)`
+    Both,
+    /// User-supplied analytical derivative. The [`MPFitter::jacobian`] method
+    /// must be implemented for parameters with this variant.
+    User,
+}
+
 /// Parameter constraint structure
 pub struct MPPar {
     /// A boolean value, whether the parameter is to be held
@@ -127,6 +145,24 @@ pub struct MPPar {
     /// setting.  If the parameter is zero, then a default
     /// step size is chosen.
     pub rel_step: f64,
+    /// Controls how the derivative is computed for this parameter.
+    /// See [`MPSide`] for the available modes. Default: [`MPSide::Auto`].
+    pub side: MPSide,
+    /// If `true`, compute *both* the analytical derivative (via
+    /// [`MPFitter::jacobian`]) *and* a numerical derivative, print a
+    /// comparison to stderr, and use the numerical value. Useful for
+    /// verifying that a hand-coded Jacobian is correct.
+    ///
+    /// **Note:** when `deriv_debug` is `true`, do *not* set `side` to
+    /// [`MPSide::User`]; instead set it to the numerical variant you want to
+    /// compare against (`Auto`, `Right`, `Left`, or `Both`).
+    pub deriv_debug: bool,
+    /// Relative tolerance for the derivative debug comparison. Differences
+    /// smaller than `deriv_reltol * |analytical|` are not printed.
+    pub deriv_reltol: f64,
+    /// Absolute tolerance for the derivative debug comparison. Differences
+    /// smaller than `deriv_abstol` are not printed.
+    pub deriv_abstol: f64,
 }
 
 impl MPPar {
@@ -139,6 +175,10 @@ impl MPPar {
             limit_up: 0.0,
             step: 0.0,
             rel_step: 0.0,
+            side: MPSide::Auto,
+            deriv_debug: false,
+            deriv_reltol: 0.0,
+            deriv_abstol: 0.0,
         }
     }
 }
@@ -293,6 +333,33 @@ pub trait MPFitter {
         None
     }
 
+    /// Optionally supply analytical (user-computed) partial derivatives.
+    /// This method is called once per Jacobian evaluation whenever at least
+    /// one free parameter has [`MPSide::User`] set (or has `deriv_debug`
+    /// enabled). The default implementation returns [`MPError::Eval`], which
+    /// causes the fit to abort – override it when you set any parameter's
+    /// `side` to [`MPSide::User`].
+    ///
+    /// # Arguments
+    /// * `params`   – current values of *all* parameters (length = `npar`).
+    /// * `deviates` – output residuals (same as [`MPFitter::eval`]).
+    /// * `derivs`   – per-parameter derivative columns, length = `npar`.
+    ///   - `derivs[i]` is `Some(col)` when parameter `i` needs an analytical
+    ///     derivative; `col` has length `m` (number of residuals). Fill
+    ///     `col[k]` with `ddeviates[k] / dparams[i]`.
+    ///   - `derivs[i]` is `None` for parameters using numerical derivatives.
+    /// The method must also fill `deviates` (the residual vector), exactly as
+    /// [`MPFitter::eval`] would.
+    #[allow(unused_variables)]
+    fn jacobian(
+        &mut self,
+        params: &[f64],
+        deviates: &mut [f64],
+        derivs: &mut [Option<Vec<f64>>],
+    ) -> MPResult<()> {
+        Err(MPError::Eval)
+    }
+
     /// Main function to refine the parameters.
     /// # Arguments
     /// * `xall` - A mutable slice with starting fit parameters
@@ -360,6 +427,10 @@ struct MPFit<'a, T: MPFitter> {
     fjac: Vec<f64>,
     step: Vec<f64>,
     dstep: Vec<f64>,
+    dside: Vec<MPSide>,
+    dderiv_debug: Vec<bool>,
+    dderiv_reltol: Vec<f64>,
+    dderiv_abstol: Vec<f64>,
     qllim: Vec<bool>,
     qulim: Vec<bool>,
     llim: Vec<f64>,
@@ -404,6 +475,10 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 fjac: vec![],
                 step: vec![],
                 dstep: vec![],
+                dside: vec![],
+                dderiv_debug: vec![],
+                dderiv_reltol: vec![],
+                dderiv_abstol: vec![],
                 qllim: vec![],
                 qulim: vec![],
                 llim: vec![],
@@ -502,14 +577,53 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
     ///     burton s. garbow, kenneth e. hillstrom, jorge j. more
     ///
     fn fdjac2(&mut self) -> MPResult<()> {
-        // Calculate the Jacobian matrix
         let eps = self.cfg.epsfcn.max(f64::EPSILON).sqrt();
-        // TODO: probably sides and analytical derivatives should be implemented at some point
         self.fjac.fill(0.);
-        let mut ij = 0;
-        /* Any parameters requiring numerical derivatives */
+        let has_analytical = self
+            .dside
+            .iter()
+            .zip(&self.dderiv_debug)
+            .any(|(s, d)| *s == MPSide::User || *d);
+        if has_analytical {
+            let m = self.m;
+            let npar = self.npar;
+            let mut derivs: Vec<Option<Vec<f64>>> = vec![None; npar];
+            for j in 0..self.nfree {
+                let free_p = self.ifree[j];
+                if self.dside[j] == MPSide::User || self.dderiv_debug[j] {
+                    derivs[free_p] = Some(vec![0.0; m]);
+                }
+            }
+            self.f.jacobian(&self.xnew, &mut self.wa4, &mut derivs)?;
+            self.nfev += 1;
+            for j in 0..self.nfree {
+                let free_p = self.ifree[j];
+                if let Some(ref col) = derivs[free_p] {
+                    let base = j * m;
+                    self.fjac[base..base + m].copy_from_slice(col);
+                }
+            }
+        }
+        let has_debug = self.dderiv_debug.iter().any(|d| *d);
+        if has_debug {
+            eprintln!("FJAC DEBUG BEGIN");
+            eprintln!(
+                "#  {:>10} {:>10} {:>10} {:>10} {:>10} {:>10}",
+                "IPNT", "FUNC", "DERIV_U", "DERIV_N", "DIFF_ABS", "DIFF_REL"
+            );
+        }
+        let mut ij = 0usize;
         for j in 0..self.nfree {
             let free_p = self.ifree[j];
+            let side = self.dside[j];
+            let debug = self.dderiv_debug[j];
+            if side == MPSide::User && !debug {
+                ij += self.m;
+                continue;
+            }
+            if debug {
+                eprintln!("FJAC PARM {}", free_p);
+            }
             let temp = self.xnew[free_p];
             let mut h = eps * temp.abs();
             if free_p < self.step.len() && self.step[free_p] > 0. {
@@ -521,10 +635,12 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             if h == 0. {
                 h = eps;
             }
-            if j < self.qulim.len()
-                && self.qulim[j]
-                && j < self.ulim.len()
-                && temp > self.ulim[j] - h
+            if side == MPSide::Left
+                || (side == MPSide::Auto
+                    && j < self.qulim.len()
+                    && self.qulim[j]
+                    && j < self.ulim.len()
+                    && temp > self.ulim[j] - h)
             {
                 h = -h;
             }
@@ -532,10 +648,74 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             self.f.eval(&self.xnew, &mut self.wa4)?;
             self.nfev += 1;
             self.xnew[free_p] = temp;
-            for (wa4, fvec) in self.wa4.iter().zip(&self.fvec) {
-                self.fjac[ij] = (wa4 - fvec) / h;
-                ij += 1;
+            if side != MPSide::Both {
+                let dr = self.dderiv_reltol[j];
+                let da = self.dderiv_abstol[j];
+                for i in 0..self.m {
+                    let numerical = (self.wa4[i] - self.fvec[i]) / h;
+                    if debug {
+                        let analytical = self.fjac[ij];
+                        let diff = analytical - numerical;
+                        if (da == 0. && dr == 0. && (analytical != 0. || numerical != 0.))
+                            || ((da != 0. || dr != 0.) && diff.abs() > da + analytical.abs() * dr)
+                        {
+                            eprintln!(
+                                "   {:>10} {:>10.4e} {:>10.4e} {:>10.4e} {:>10.4e} {:>10.4e}",
+                                i,
+                                self.fvec[i],
+                                analytical,
+                                numerical,
+                                diff,
+                                if analytical == 0. {
+                                    0.
+                                } else {
+                                    diff / analytical
+                                }
+                            );
+                        }
+                    }
+                    self.fjac[ij] = numerical;
+                    ij += 1;
+                }
+            } else {
+                let m = self.m;
+                self.wa2[..m].copy_from_slice(&self.wa4[..m]);
+                self.xnew[free_p] = temp - h;
+                self.f.eval(&self.xnew, &mut self.wa4)?; // wa4 = f(x-h)
+                self.nfev += 1;
+                self.xnew[free_p] = temp;
+                let dr = self.dderiv_reltol[j];
+                let da = self.dderiv_abstol[j];
+                for i in 0..m {
+                    let numerical = (self.wa2[i] - self.wa4[i]) / (2. * h);
+                    if debug {
+                        let analytical = self.fjac[ij];
+                        let diff = analytical - numerical;
+                        if (da == 0. && dr == 0. && (analytical != 0. || numerical != 0.))
+                            || ((da != 0. || dr != 0.) && diff.abs() > da + analytical.abs() * dr)
+                        {
+                            eprintln!(
+                                "   {:>10} {:>10.4e} {:>10.4e} {:>10.4e} {:>10.4e} {:>10.4e}",
+                                i,
+                                self.fvec[i],
+                                analytical,
+                                numerical,
+                                diff,
+                                if analytical == 0. {
+                                    0.
+                                } else {
+                                    diff / analytical
+                                }
+                            );
+                        }
+                    }
+                    self.fjac[ij] = numerical;
+                    ij += 1;
+                }
             }
+        }
+        if has_debug {
+            eprintln!("FJAC DEBUG END");
         }
         Ok(())
     }
@@ -698,6 +878,10 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             None => {
                 self.nfree = self.npar;
                 self.ifree = (0..self.npar).collect();
+                self.dside = vec![MPSide::Auto; self.npar];
+                self.dderiv_debug = vec![false; self.npar];
+                self.dderiv_reltol = vec![0.0; self.npar];
+                self.dderiv_abstol = vec![0.0; self.npar];
             }
             Some(pars) => {
                 if pars.is_empty() {
@@ -733,6 +917,10 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                     }
                     self.step.push(p.step);
                     self.dstep.push(p.rel_step);
+                    self.dside.push(p.side);
+                    self.dderiv_debug.push(p.deriv_debug);
+                    self.dderiv_reltol.push(p.deriv_reltol);
+                    self.dderiv_abstol.push(p.deriv_abstol);
                 });
             }
         };
@@ -2060,12 +2248,7 @@ mod tests {
             MPPar::default(),
             MPPar {
                 fixed: true,
-                limited_low: false,
-                limited_up: false,
-                limit_low: 0.0,
-                limit_up: 0.0,
-                step: 0.0,
-                rel_step: 0.0,
+                ..MPPar::new()
             },
             MPPar::default(),
         ]);
@@ -2179,22 +2362,12 @@ mod tests {
         l.pars = Some([
             MPPar {
                 fixed: true,
-                limited_low: false,
-                limited_up: false,
-                limit_low: 0.0,
-                limit_up: 0.0,
-                step: 0.0,
-                rel_step: 0.0,
+                ..MPPar::new()
             },
             MPPar::default(),
             MPPar {
                 fixed: true,
-                limited_low: false,
-                limited_up: false,
-                limit_low: 0.0,
-                limit_up: 0.0,
-                step: 0.0,
-                rel_step: 0.0,
+                ..MPPar::new()
             },
             MPPar::default(),
         ]);
@@ -2252,13 +2425,11 @@ mod tests {
         MPPar::new(),
         MPPar::new(),
         MPPar {
-            fixed: false,
             limited_low: true,
             limited_up: true,
             limit_low: 0.0,
             limit_up: 1.0,
-            step: 0.0,
-            rel_step: 0.0,
+            ..MPPar::new()
         },
     ];
 
