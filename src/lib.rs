@@ -2984,4 +2984,232 @@ mod tests {
             }
         };
     }
+
+    #[test]
+    fn lin_sided() {
+        use crate::MPSide;
+
+        struct Linear {
+            x: Vec<f64>,
+            y: Vec<f64>,
+            ye: Vec<f64>,
+            pars: [MPPar; 2],
+        }
+
+        impl MPFitter for Linear {
+            fn eval(&mut self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
+                for (((d, x), y), ye) in deviates
+                    .iter_mut()
+                    .zip(self.x.iter())
+                    .zip(self.y.iter())
+                    .zip(self.ye.iter())
+                {
+                    *d = (*y - (params[0] + params[1] * *x)) / *ye;
+                }
+                Ok(())
+            }
+
+            fn number_of_points(&self) -> usize {
+                self.x.len()
+            }
+
+            fn parameters(&self) -> Option<&[MPPar]> {
+                Some(&self.pars)
+            }
+        }
+
+        let mut l = Linear {
+            x: vec![
+                -1.7237128E+00,
+                1.8712276E+00,
+                -9.6608055E-01,
+                -2.8394297E-01,
+                1.3416969E+00,
+                1.3757038E+00,
+                -1.3703436E+00,
+                4.2581975E-02,
+                -1.4970151E-01,
+                8.2065094E-01,
+            ],
+            y: vec![
+                1.9000429E-01,
+                6.5807428E+00,
+                1.4582725E+00,
+                2.7270851E+00,
+                5.5969253E+00,
+                5.6249280E+00,
+                0.787615,
+                3.2599759E+00,
+                2.9771762E+00,
+                4.5936475E+00,
+            ],
+            ye: vec![0.07; 10],
+            pars: [
+                MPPar {
+                    side: MPSide::Both,
+                    ..MPPar::new()
+                },
+                MPPar {
+                    side: MPSide::Both,
+                    ..MPPar::new()
+                },
+            ],
+        };
+        let mut init = [1., 1.];
+        let res = l.mpfit(&mut init);
+        match res {
+            Ok(status) => {
+                assert_eq!(status.success, MPSuccess::Chi);
+                assert_eq!(status.n_iter, 3);
+                assert_eq!(status.n_fev, 12);
+                assert_approx_eq!(status.best_norm, 2.75628498);
+                assert_approx_eq!(init[0], 3.20996572);
+                assert_approx_eq!(init[1], 1.77095420);
+                assert_approx_eq!(status.xerror[0], 0.02221018);
+                assert_approx_eq!(status.xerror[1], 0.01893756);
+            }
+            Err(err) => {
+                panic!("Error in lin_sided fit: {}", err);
+            }
+        }
+    }
+
+    #[test]
+    fn gauss_analytical() {
+        use crate::MPSide;
+
+        struct Gaussian {
+            x: Vec<f64>,
+            y: Vec<f64>,
+            ye: Vec<f64>,
+            pars: [MPPar; 4],
+        }
+
+        impl MPFitter for Gaussian {
+            fn eval(&mut self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
+                let sig2 = params[3] * params[3];
+                for (((d, x), y), ye) in deviates
+                    .iter_mut()
+                    .zip(self.x.iter())
+                    .zip(self.y.iter())
+                    .zip(self.ye.iter())
+                {
+                    let xc = *x - params[2];
+                    let f = params[1] * (-0.5 * xc * xc / sig2).exp() + params[0];
+                    *d = (*y - f) / *ye;
+                }
+                Ok(())
+            }
+
+            fn number_of_points(&self) -> usize {
+                self.x.len()
+            }
+
+            fn parameters(&self) -> Option<&[MPPar]> {
+                Some(&self.pars)
+            }
+
+            fn jacobian(
+                &mut self,
+                params: &[f64],
+                deviates: &mut [f64],
+                derivs: &mut [Option<Vec<f64>>],
+            ) -> MPResult<()> {
+                let sig2 = params[3] * params[3];
+                let sig = params[3];
+                for (i, (((d, x), y), ye)) in deviates
+                    .iter_mut()
+                    .zip(self.x.iter())
+                    .zip(self.y.iter())
+                    .zip(self.ye.iter())
+                    .enumerate()
+                {
+                    let xc = *x - params[2];
+                    let e = (-0.5 * xc * xc / sig2).exp();
+                    let f = params[1] * e + params[0];
+                    *d = (*y - f) / *ye;
+                    if let Some(col) = &mut derivs[0] {
+                        col[i] = -1.0 / *ye;
+                    }
+                    if let Some(col) = &mut derivs[1] {
+                        col[i] = -e / *ye;
+                    }
+                    if let Some(col) = &mut derivs[2] {
+                        col[i] = -params[1] * e * xc / (sig2 * *ye);
+                    }
+                    if let Some(col) = &mut derivs[3] {
+                        col[i] = -params[1] * e * xc * xc / (sig2 * sig * *ye);
+                    }
+                }
+                Ok(())
+            }
+        }
+
+        let mut l = Gaussian {
+            x: vec![
+                -1.7237128E+00,
+                1.8712276E+00,
+                -9.6608055E-01,
+                -2.8394297E-01,
+                1.3416969E+00,
+                1.3757038E+00,
+                -1.3703436E+00,
+                4.2581975E-02,
+                -1.4970151E-01,
+                8.2065094E-01,
+            ],
+            y: vec![
+                -4.4494256E-02,
+                8.7324673E-01,
+                7.4443483E-01,
+                4.7631559E+00,
+                1.7187297E-01,
+                1.1639182E-01,
+                1.5646480E+00,
+                5.2322268E+00,
+                4.2543168E+00,
+                6.2792623E-01,
+            ],
+            ye: vec![0.5; 10],
+            pars: [
+                MPPar {
+                    side: MPSide::User,
+                    ..MPPar::new()
+                },
+                MPPar {
+                    side: MPSide::User,
+                    ..MPPar::new()
+                },
+                MPPar {
+                    side: MPSide::User,
+                    ..MPPar::new()
+                },
+                MPPar {
+                    side: MPSide::User,
+                    ..MPPar::new()
+                },
+            ],
+        };
+        let mut init = [0., 1., 1., 1.];
+        let res = l.mpfit(&mut init);
+        match res {
+            Ok(status) => {
+                assert_eq!(status.success, MPSuccess::Chi);
+                assert_eq!(status.n_iter, 27);
+                assert_eq!(status.n_fev, 56);
+                assert_approx_eq!(status.best_norm, 10.35003196);
+                assert_approx_eq!(init[0], 0.48044336);
+                assert_approx_eq!(init[1], 4.55075247);
+                assert_approx_eq!(init[2], -0.06256246);
+                assert_approx_eq!(init[3], 0.39747174);
+                assert_approx_eq!(status.xerror[0], 0.23223493);
+                assert_approx_eq!(status.xerror[1], 0.39543448);
+                assert_approx_eq!(status.xerror[2], 0.07471491);
+                assert_approx_eq!(status.xerror[3], 0.08999568);
+            }
+            Err(err) => {
+                panic!("Error in gauss_analytical fit: {}", err);
+            }
+        }
+    }
 }
