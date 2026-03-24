@@ -190,6 +190,7 @@ impl Default for MPPar {
 }
 
 /// MPFIT configuration structure
+#[derive(Clone)]
 pub struct MPConfig {
     /// Relative chi-square convergence criterion (Default: 1e-10)
     pub ftol: f64,
@@ -221,8 +222,8 @@ pub struct MPConfig {
     pub no_finite_check: bool,
 }
 
-impl Default for MPConfig {
-    fn default() -> Self {
+impl MPConfig {
+    pub const fn new() -> Self {
         MPConfig {
             ftol: 1e-10,
             xtol: 1e-10,
@@ -237,6 +238,13 @@ impl Default for MPConfig {
         }
     }
 }
+
+impl Default for MPConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 
 /// MPFIT error status
 pub enum MPError {
@@ -321,16 +329,20 @@ pub trait MPFitter {
     /// Number of the data points in the user private data.
     fn number_of_points(&self) -> usize;
 
-    /// Returns a default config.
-    /// It should be reimplemented if user needs a custom config.
-    fn config(&self) -> MPConfig {
-        MPConfig::default()
+    /// Returns the configuration for this fit.
+    /// Override to supply a custom [`MPConfig`]; the default returns a
+    /// reference to a shared static with all-default values.
+    fn config(&self) -> &MPConfig {
+        static DEFAULT: MPConfig = MPConfig::new();
+        &DEFAULT
     }
 
-    /// Parameters for fitted values.
-    /// User must reimplement this method if the custom parameters are needed.
-    fn parameters(&self) -> Option<&[MPPar]> {
-        None
+    /// Returns parameter constraints for the fitted values.
+    /// Override when you need fixed parameters, bounds, or custom step sizes.
+    /// An empty slice (the default) means all parameters are free with no
+    /// constraints — identical to the old `None` return.
+    fn parameters(&self) -> &[MPPar] {
+        &[]
     }
 
     /// Optionally supply analytical (user-computed) partial derivatives.
@@ -367,7 +379,10 @@ pub trait MPFitter {
     where
         Self: Sized,
     {
-        let config = self.config();
+        // Clone once so the immutable borrow ends before we pass `self` mutably
+        // into MPFit.  Users returning &self.config avoid constructing a new
+        // value; users using the default return a &'static so the clone is cheap.
+        let config = self.config().clone();
         let mut fit = MPFit::new(self, xall, &config)?;
         fit.check_config()?;
         fit.parse_params()?;
@@ -874,56 +889,52 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
     }
 
     fn parse_params(&mut self) -> MPResult<()> {
-        match &self.f.parameters() {
-            None => {
-                self.nfree = self.npar;
-                self.ifree = (0..self.npar).collect();
-                self.dside = vec![MPSide::Auto; self.npar];
-                self.dderiv_debug = vec![false; self.npar];
-                self.dderiv_reltol = vec![0.0; self.npar];
-                self.dderiv_abstol = vec![0.0; self.npar];
+        let pars = self.f.parameters();
+        if pars.is_empty() {
+            // No constraints: every parameter is free with default derivative settings.
+            self.nfree = self.npar;
+            self.ifree = (0..self.npar).collect();
+            self.dside = vec![MPSide::Auto; self.npar];
+            self.dderiv_debug = vec![false; self.npar];
+            self.dderiv_reltol = vec![0.0; self.npar];
+            self.dderiv_abstol = vec![0.0; self.npar];
+        } else {
+            pars.iter().enumerate().for_each(|(i, p)| {
+                if !p.fixed {
+                    self.nfree += 1;
+                    self.ifree.push(i);
+                }
+            });
+            if self.nfree == 0 {
+                return Err(MPError::NoFree);
             }
-            Some(pars) => {
-                if pars.is_empty() {
-                    return Err(MPError::Empty);
+            for (i, p) in pars.iter().enumerate() {
+                if (p.limited_low && (self.xall[i] < p.limit_low))
+                    || (p.limited_up && (self.xall[i] > p.limit_up))
+                {
+                    return Err(MPError::InitBounds);
                 }
-                pars.iter().enumerate().for_each(|(i, p)| {
-                    if !p.fixed {
-                        self.nfree += 1;
-                        self.ifree.push(i);
-                    }
-                });
-                if self.nfree == 0 {
-                    return Err(MPError::NoFree);
+                if !p.fixed && p.limited_low && p.limited_up && p.limit_low >= p.limit_up {
+                    return Err(MPError::Bounds);
                 }
-                for (i, p) in pars.iter().enumerate() {
-                    if (p.limited_low && (self.xall[i] < p.limit_low))
-                        || (p.limited_up && (self.xall[i] > p.limit_up))
-                    {
-                        return Err(MPError::InitBounds);
-                    }
-                    if !p.fixed && p.limited_low && p.limited_up && p.limit_low >= p.limit_up {
-                        return Err(MPError::Bounds);
-                    }
-                }
-                self.ifree.iter().for_each(|i| {
-                    let p = &pars[*i];
-                    self.qllim.push(p.limited_low);
-                    self.qulim.push(p.limited_up);
-                    self.llim.push(p.limit_low);
-                    self.ulim.push(p.limit_up);
-                    if p.limited_low || p.limited_up {
-                        self.qanylim = true;
-                    }
-                    self.step.push(p.step);
-                    self.dstep.push(p.rel_step);
-                    self.dside.push(p.side);
-                    self.dderiv_debug.push(p.deriv_debug);
-                    self.dderiv_reltol.push(p.deriv_reltol);
-                    self.dderiv_abstol.push(p.deriv_abstol);
-                });
             }
-        };
+            self.ifree.iter().for_each(|i| {
+                let p = &pars[*i];
+                self.qllim.push(p.limited_low);
+                self.qulim.push(p.limited_up);
+                self.llim.push(p.limit_low);
+                self.ulim.push(p.limit_up);
+                if p.limited_low || p.limited_up {
+                    self.qanylim = true;
+                }
+                self.step.push(p.step);
+                self.dstep.push(p.rel_step);
+                self.dside.push(p.side);
+                self.dderiv_debug.push(p.deriv_debug);
+                self.dderiv_reltol.push(p.deriv_reltol);
+                self.dderiv_abstol.push(p.deriv_abstol);
+            });
+        }
         if self.m < self.nfree {
             return Err(MPError::DoF);
         }
@@ -1072,20 +1083,16 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             self.xall[self.ifree[i]] = self.x[i];
         }
         /* Compute number of pegged parameters */
-        let n_pegged = match self.f.parameters() {
-            None => 0,
-            Some(params) => {
-                let mut n_pegged = 0;
-                for (i, p) in params.iter().enumerate() {
-                    if p.limited_low && p.limit_low == self.xall[i]
-                        || p.limited_up && p.limit_up == self.xall[i]
-                    {
-                        n_pegged += 1;
-                    }
-                }
-                n_pegged
-            }
-        };
+        let n_pegged = self
+            .f
+            .parameters()
+            .iter()
+            .enumerate()
+            .filter(|(i, p)| {
+                (p.limited_low && p.limit_low == self.xall[*i])
+                    || (p.limited_up && p.limit_up == self.xall[*i])
+            })
+            .count();
         /* Compute and return the covariance matrix and/or parameter errors */
         self = self.covar();
         let mut covar = vec![0.; self.npar * self.npar];
@@ -2190,10 +2197,10 @@ mod tests {
                 self.x.len()
             }
 
-            fn parameters(&self) -> Option<&[MPPar]> {
+            fn parameters(&self) -> &[MPPar] {
                 match &self.params {
-                    None => None,
-                    Some(p) => Some(p),
+                    None => &[],
+                    Some(p) => p,
                 }
             }
         }
@@ -2302,10 +2309,10 @@ mod tests {
                 self.x.len()
             }
 
-            fn parameters(&self) -> Option<&[MPPar]> {
+            fn parameters(&self) -> &[MPPar] {
                 match &self.pars {
-                    None => None,
-                    Some(p) => Some(p),
+                    None => &[],
+                    Some(p) => p,
                 }
             }
         }
@@ -2461,8 +2468,8 @@ mod tests {
             self.x.len()
         }
 
-        fn parameters(&self) -> Option<&[MPPar]> {
-            Some(Self::pars())
+        fn parameters(&self) -> &[MPPar] {
+            Self::pars()
         }
     }
 
@@ -3013,8 +3020,8 @@ mod tests {
                 self.x.len()
             }
 
-            fn parameters(&self) -> Option<&[MPPar]> {
-                Some(&self.pars)
+            fn parameters(&self) -> &[MPPar] {
+                &self.pars
             }
         }
 
@@ -3105,8 +3112,8 @@ mod tests {
                 self.x.len()
             }
 
-            fn parameters(&self) -> Option<&[MPPar]> {
-                Some(&self.pars)
+            fn parameters(&self) -> &[MPPar] {
+                &self.pars
             }
 
             fn jacobian(
