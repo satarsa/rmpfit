@@ -10,14 +10,14 @@
 //! * Removing ```goto``` (fuf).
 //! * Standard Rust Result as result.
 //! * A few loops are zipped to help the compiler optimize the code
-//!     (no performance tests are done anyway).
+//!   (no performance tests are done anyway).
 //! * Using trait ```MPFitter``` to call the user code.
 //! * Using ```bool``` type if possible.
 //!
 //! # Advantages
 //! * Pure Rust.
 //! * No external dependencies
-//!     ([assert_approx_eq](https://docs.rs/assert_approx_eq/) just for testing).
+//!   ([assert_approx_eq](https://docs.rs/assert_approx_eq/) just for testing).
 //! * Internal Jacobian calculations.
 //! * Sided, analytical or user provided derivatives are also implemented.
 //! * Derivative debug mode (comparing analytical vs numerical) prints to stderr (as in cmpfit).
@@ -359,6 +359,7 @@ pub trait MPFitter {
     ///     derivative; `col` has length `m` (number of residuals). Fill
     ///     `col[k]` with `ddeviates[k] / dparams[i]`.
     ///   - `derivs[i]` is `None` for parameters using numerical derivatives.
+    ///
     /// The method must also fill `deviates` (the residual vector), exactly as
     /// [`MPFitter::eval`] would.
     #[allow(unused_variables)]
@@ -1055,7 +1056,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         true
     }
 
-    ///	 compute the norm of the scaled gradient.
+    /// compute the norm of the scaled gradient.
     fn gnorm(&self) -> f64 {
         let mut gnorm: f64 = 0.;
         if self.fnorm != 0. {
@@ -1529,7 +1530,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         }
     }
 
-    ///	compute the newton correction.
+    /// compute the newton correction.
     fn newton_correction(&mut self, dxnorm: f64) {
         for j in 0..self.nfree {
             let l = self.ipvt[j];
