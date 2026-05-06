@@ -1678,20 +1678,12 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 self.wa4[j] = 0.;
             }
         }
-        if nsing > 0 {
-            for k in 0..nsing {
-                let j = nsing - k - 1;
-                let mut sum = 0.;
-                let jp1 = j + 1;
-                if nsing > jp1 {
-                    let mut ij = jp1 + m * j;
-                    for i in jp1..nsing {
-                        sum += self.fjac[ij] * self.wa4[i];
-                        ij += 1;
-                    }
-                }
-                self.wa4[j] = (self.wa4[j] - sum) / self.wa2[j];
+        for j in (0..nsing).rev() {
+            let mut sum = 0.0;
+            for i in j + 1..nsing {
+                sum += self.fjac[m * j + i] * self.wa4[i];
             }
+            self.wa4[j] = (self.wa4[j] - sum) / self.wa2[j];
         }
         /*
          *     permute the components of z back to components of x.
