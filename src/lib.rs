@@ -858,17 +858,17 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                         sum += self.fjac[m * j + i] * self.fjac[m * k + i];
                     }
                     let temp = sum / self.fjac[m * j + j];
-                    for i in j..self.m {
+                    for i in j..m {
                         self.fjac[m * k + i] -= temp * self.fjac[m * j + i];
                     }
                     if self.wa1[k] != 0. {
-                        let temp = self.fjac[j + self.m * k] / self.wa1[k];
+                        let temp = self.fjac[j + m * k] / self.wa1[k];
                         let temp = (1. - temp.powi(2)).max(0.);
                         self.wa1[k] *= temp.sqrt();
                         let temp = self.wa1[k] / self.wa3[k];
                         if 0.05 * temp * temp < f64::EPSILON {
-                            let start = jp1 + self.m * k;
-                            self.wa1[k] = self.fjac[start..start + self.m - j - 1].enorm();
+                            let start = jp1 + m * k;
+                            self.wa1[k] = self.fjac[start..start + m - j - 1].enorm();
                             self.wa3[k] = self.wa1[k];
                         }
                     }
@@ -1376,18 +1376,12 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             }
             jj += m + 1;
         }
-        if nsing >= 1 {
-            for k in 0..nsing {
-                let j = nsing - k - 1;
-                let mut ij = m * j;
-                self.wa3[j] /= self.fjac[j + ij];
-                let temp = self.wa3[j];
-                if j > 0 {
-                    for i in 0..j {
-                        self.wa3[i] -= self.fjac[ij] * temp;
-                        ij += 1;
-                    }
-                }
+        for j in (0..nsing).rev() {
+            let jj = m * j;
+            self.wa3[j] /= self.fjac[jj + j];
+            let temp = self.wa3[j];
+            for i in 0..j {
+                self.wa3[i] -= self.fjac[jj + i] * temp;
             }
         }
         for j in 0..self.nfree {
