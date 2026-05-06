@@ -1692,6 +1692,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
     }
 
     fn iterate(&mut self, gnorm: f64) -> MPResult<MPDone> {
+        let m = self.m;
         for j in 0..self.nfree {
             self.wa1[j] = -self.wa1[j];
         }
@@ -1763,7 +1764,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         }
         self.f.eval(&self.xnew, &mut self.wa4)?;
         self.nfev += 1;
-        self.fnorm1 = self.wa4[0..self.m].enorm();
+        self.fnorm1 = self.wa4[0..m].enorm();
         /*
          *	    compute the scaled actual reduction.
          */
@@ -1777,17 +1778,14 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
          *	    compute the scaled predicted reduction and
          *	    the scaled directional derivative.
          */
+        self.wa3[..self.nfree].fill(0.0);
         let mut jj = 0;
         for j in 0..self.nfree {
-            self.wa3[j] = 0.;
-            let l = self.ipvt[j];
-            let temp = self.wa1[l];
-            let mut ij = jj;
+            let temp = self.wa1[self.ipvt[j]];
             for i in 0..=j {
-                self.wa3[i] += self.fjac[ij] * temp;
-                ij += 1;
+                self.wa3[i] += self.fjac[jj + i] * temp;
             }
-            jj += self.m;
+            jj += m;
         }
         /*
          * Remember, alpha is the fraction of the full LM step actually
@@ -1835,7 +1833,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 self.x[j] = self.wa2[j];
                 self.wa2[j] = self.diag[self.ifree[j]] * self.x[j];
             }
-            for i in 0..self.m {
+            for i in 0..m {
                 self.fvec[i] = self.wa4[i];
             }
             self.xnorm = self.wa2[0..self.nfree].enorm();
