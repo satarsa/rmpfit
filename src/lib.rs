@@ -1625,7 +1625,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                     if self.wa2[k] == 0. {
                         continue;
                     }
-                    let kk = k + m * k;
+                    let kk = k * (m + 1);
                     let (sinx, cosx) = if self.fjac[kk].abs() < self.wa2[k].abs() {
                         let cotan = self.fjac[kk] / self.wa2[k];
                         let sinx = 0.5 / (0.25 + 0.25 * cotan * cotan).sqrt();
@@ -1648,15 +1648,12 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                     /*
                      *	    accumulate the tranformation in the row of s.
                      */
-                    let kp1 = k + 1;
-                    if self.nfree > kp1 {
-                        let mut ik = kk + 1;
-                        for i in kp1..self.nfree {
-                            let temp = cosx * self.fjac[ik] + sinx * self.wa2[i];
-                            self.wa2[i] = -sinx * self.fjac[ik] + cosx * self.wa2[i];
-                            self.fjac[ik] = temp;
-                            ik += 1;
-                        }
+                    for i in k + 1..self.nfree {
+                        let j = m * k + i;
+                        let f = self.fjac[j];
+                        let w = self.wa2[i];
+                        self.fjac[j] = cosx * f + sinx * w;
+                        self.wa2[i] = cosx * w - sinx * f;
                     }
                 }
             }
