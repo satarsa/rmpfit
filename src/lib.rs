@@ -809,35 +809,33 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
     fn qrfac(&mut self) {
         // Compute the QR factorization of the jacobian
         // compute the initial column norms and initialize several arrays.
-        for (j, ij) in (0..self.nfree).zip((0..self.m * self.nfree).step_by(self.m)) {
-            self.wa2[j] = self.fjac[ij..ij + self.m].enorm();
-            self.wa1[j] = self.wa2[j];
-            self.wa3[j] = self.wa1[j];
+        let m = self.m;
+        for (j, col) in self.fjac[..m * self.nfree].chunks_exact(m).enumerate() {
+            let norm = col.enorm();
+            self.wa1[j] = norm;
+            self.wa2[j] = norm;
+            self.wa3[j] = norm;
             self.ipvt[j] = j;
         }
         // reduce a to r with householder transformations.
-        for j in 0..self.m.min(self.nfree) {
+        for j in 0..m.min(self.nfree) {
             // bring the column of largest norm into the pivot position.
             let mut kmax = j;
-            for k in j..self.nfree {
+            for k in j + 1..self.nfree {
                 if self.wa1[k] > self.wa1[kmax] {
                     kmax = k;
                 }
             }
             if kmax != j {
-                let mut ij = self.m * j;
-                let mut jj = self.m * kmax;
-                for _ in 0..self.m {
-                    self.fjac.swap(jj, ij);
-                    ij += 1;
-                    jj += 1;
+                for i in 0..m {
+                    self.fjac.swap(m * j + i, m * kmax + i);
                 }
                 self.wa1[kmax] = self.wa1[j];
                 self.wa3[kmax] = self.wa3[j];
                 self.ipvt.swap(j, kmax);
             }
-            let jj = j + self.m * j;
-            let jjj = self.m - j + jj;
+            let jj = j * (m + 1);
+            let jjj = m - j + jj;
             let mut ajnorm = self.fjac[jj..jjj].enorm();
             if ajnorm == 0. {
                 self.wa1[j] = -ajnorm;
@@ -856,20 +854,12 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             if jp1 < self.nfree {
                 for k in jp1..self.nfree {
                     let mut sum = 0.;
-                    let mut ij = j + self.m * k;
-                    let mut jj = j + self.m * j;
-                    for _ in j..self.m {
-                        sum += self.fjac[jj] * self.fjac[ij];
-                        ij += 1;
-                        jj += 1;
+                    for i in j..m {
+                        sum += self.fjac[m * j + i] * self.fjac[m * k + i];
                     }
-                    let temp = sum / self.fjac[j + self.m * j];
-                    ij = j + self.m * k;
-                    jj = j + self.m * j;
-                    for _ in j..self.m {
-                        self.fjac[ij] -= temp * self.fjac[jj];
-                        ij += 1;
-                        jj += 1;
+                    let temp = sum / self.fjac[m * j + j];
+                    for i in j..self.m {
+                        self.fjac[m * k + i] -= temp * self.fjac[m * j + i];
                     }
                     if self.wa1[k] != 0. {
                         let temp = self.fjac[j + self.m * k] / self.wa1[k];
@@ -1065,10 +1055,8 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 let l = self.ipvt[j];
                 if self.wa2[l] != 0. {
                     let mut sum = 0.;
-                    let mut ij = jj;
-                    for i in 0..=j {
+                    for (ij, i) in (jj..).zip(0..=j) {
                         sum += self.fjac[ij] * (self.qtf[i] / self.fnorm);
-                        ij += 1;
                     }
                     gnorm = gnorm.max((sum / self.wa2[l]).abs());
                 }
@@ -1375,6 +1363,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
          *     compute and store in wa1 the gauss-newton direction. if the
          *     jacobian is rank-deficient, obtain a least squares solution.
          */
+        let m = self.m;
         let mut nsing = self.nfree;
         let mut jj = 0;
         for j in 0..self.nfree {
@@ -1385,12 +1374,12 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             if nsing < self.nfree {
                 self.wa3[j] = 0.;
             }
-            jj += self.m + 1;
+            jj += m + 1;
         }
         if nsing >= 1 {
             for k in 0..nsing {
                 let j = nsing - k - 1;
-                let mut ij = self.m * j;
+                let mut ij = m * j;
                 self.wa3[j] /= self.fjac[j + ij];
                 let temp = self.wa3[j];
                 if j > 0 {
@@ -1428,16 +1417,12 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             self.newton_correction(dxnorm);
             let mut jj = 0;
             for j in 0..self.nfree {
-                let mut sum = 0.;
-                if j > 0 {
-                    let mut ij = jj;
-                    for i in 0..j {
-                        sum += self.fjac[ij] * self.wa3[i];
-                        ij += 1;
-                    }
+                let mut sum = 0.0;
+                for i in 0..j {
+                    sum += self.fjac[jj + i] * self.wa3[i];
                 }
-                self.wa3[j] = (self.wa3[j] - sum) / self.fjac[j + self.m * j];
-                jj += self.m;
+                self.wa3[j] = (self.wa3[j] - sum) / self.fjac[jj + j];
+                jj += m;
             }
             let temp = self.wa3[0..self.nfree].enorm();
             parl = ((fp / self.delta) / temp) / temp;
@@ -1447,15 +1432,13 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
          */
         let mut jj = 0;
         for j in 0..self.nfree {
-            let mut sum = 0.;
-            let mut ij = jj;
+            let mut sum = 0.0;
             for i in 0..=j {
-                sum += self.fjac[ij] * self.qtf[i];
-                ij += 1;
+                sum += self.fjac[jj + i] * self.qtf[i];
             }
             let l = self.ipvt[j];
             self.wa3[j] = sum / self.diag[self.ifree[l]];
-            jj += self.m;
+            jj += m;
         }
         let gnorm = self.wa3[0..self.nfree].enorm();
         let mut paru = gnorm / self.delta;
@@ -1502,15 +1485,10 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
             for j in 0..self.nfree {
                 self.wa3[j] /= self.wa2[j];
                 let temp = self.wa3[j];
-                let jp1 = j + 1;
-                if jp1 < self.nfree {
-                    let mut ij = jp1 + jj;
-                    for i in jp1..self.nfree {
-                        self.wa3[i] -= self.fjac[ij] * temp;
-                        ij += 1;
-                    }
+                for i in j + 1..self.nfree {
+                    self.wa3[i] -= self.fjac[jj + i] * temp;
                 }
-                jj += self.m;
+                jj += m;
             }
             let temp = self.wa3[0..self.nfree].enorm();
             let parc = ((fp / self.delta) / temp) / temp;
@@ -1616,18 +1594,16 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
          *     copy r and (q transpose)*b to preserve input and initialize s.
          *     in particular, save the diagonal elements of r in x.
          */
+        let m = self.m;
         let mut kk = 0;
         for j in 0..self.nfree {
-            let mut ij = kk;
-            let mut ik = kk;
-            for _ in j..self.nfree {
-                self.fjac[ij] = self.fjac[ik];
-                ij += 1;
-                ik += self.m;
+            // mirror row j of R into column j
+            for i in j..self.nfree {
+                self.fjac[m * j + i] = self.fjac[j + m * i];
             }
-            self.wa1[j] = self.fjac[kk];
+            self.wa1[j] = self.fjac[kk]; // save R[j,j]
             self.wa4[j] = self.qtf[j];
-            kk += self.m + 1;
+            kk += m + 1;
         }
         /*
          *     eliminate the diagonal matrix d using a givens rotation.
@@ -1639,10 +1615,8 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
              */
             let l = self.ipvt[j];
             if self.wa3[l] != 0. {
-                for k in j..self.nfree {
-                    self.wa2[k] = 0.;
-                }
                 self.wa2[j] = self.wa3[l];
+                self.wa2[j + 1..self.nfree].fill(0.0);
                 /*
                  *	 the transformations to eliminate the row of d
                  *	 modify only a single element of (q transpose)*b
@@ -1657,7 +1631,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                     if self.wa2[k] == 0. {
                         continue;
                     }
-                    let kk = k + self.m * k;
+                    let kk = k + m * k;
                     let (sinx, cosx) = if self.fjac[kk].abs() < self.wa2[k].abs() {
                         let cotan = self.fjac[kk] / self.wa2[k];
                         let sinx = 0.5 / (0.25 + 0.25 * cotan * cotan).sqrt();
@@ -1696,7 +1670,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
              *	 store the diagonal element of s and restore
              *	 the corresponding diagonal element of r.
              */
-            let kk = j + self.m * j;
+            let kk = j * (m + 1);
             self.wa2[j] = self.fjac[kk];
             self.fjac[kk] = self.wa1[j];
         }
@@ -1719,7 +1693,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 let mut sum = 0.;
                 let jp1 = j + 1;
                 if nsing > jp1 {
-                    let mut ij = jp1 + self.m * j;
+                    let mut ij = jp1 + m * j;
                     for i in jp1..nsing {
                         sum += self.fjac[ij] * self.wa4[i];
                         ij += 1;
