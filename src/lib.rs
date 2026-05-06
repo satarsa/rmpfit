@@ -951,30 +951,27 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         if !self.qanylim {
             return;
         }
+        let m = self.m;
         for j in 0..self.nfree {
             let lpegged = j < self.qllim.len() && self.x[j] == self.llim[j];
             let upegged = j < self.qulim.len() && self.x[j] == self.ulim[j];
             let mut sum = 0.;
             // If the parameter is pegged at a limit, compute the gradient direction
-            let ij = j * self.m;
+            let ij = j * m;
             if lpegged || upegged {
-                for i in 0..self.m {
+                for i in 0..m {
                     sum += self.fvec[i] * self.fjac[ij + i];
                 }
             }
             // If pegged at lower limit and gradient is toward negative then
             // reset gradient to zero
             if lpegged && sum > 0. {
-                for i in 0..self.m {
-                    self.fjac[ij + i] = 0.;
-                }
+                self.fjac[ij..ij + m].fill(0.0);
             }
             // If pegged at upper limit and gradient is toward positive then
             // reset gradient to zero
             if upegged && sum < 0. {
-                for i in 0..self.m {
-                    self.fjac[ij + i] = 0.;
-                }
+                self.fjac[ij..ij + m].fill(0.0);
             }
         }
     }
@@ -1688,6 +1685,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         /*
          *     permute the components of z back to components of x.
          */
+
         for j in 0..self.nfree {
             self.wa1[self.ipvt[j]] = self.wa4[j];
         }
