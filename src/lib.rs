@@ -1177,10 +1177,11 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         /*
          * form the inverse of r in the full upper triangle of r.
          */
+        let m = self.m;
         let tolr = self.cfg.covtol * self.fjac[0].abs();
         let mut l: isize = -1;
         for k in 0..self.nfree {
-            let k0 = k * self.m;
+            let k0 = k * m;
             let kk = k0 + k;
             if self.fjac[kk].abs() <= tolr {
                 break;
@@ -1190,7 +1191,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 let kj = k0 + j;
                 let temp = self.fjac[kk] * self.fjac[kj];
                 self.fjac[kj] = 0.;
-                let j0 = j * self.m;
+                let j0 = j * m;
                 for i in 0..=j {
                     self.fjac[k0 + i] += -temp * self.fjac[j0 + i];
                 }
@@ -1204,10 +1205,10 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         if l >= 0 {
             let l = l as usize;
             for k in 0..=l {
-                let k0 = k * self.m;
+                let k0 = k * m;
                 for j in 0..k {
                     let temp = self.fjac[k0 + j];
-                    let j0 = j * self.m;
+                    let j0 = j * m;
                     for i in 0..=j {
                         self.fjac[j0 + i] += temp * self.fjac[k0 + i];
                     }
@@ -1225,30 +1226,28 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         for j in 0..self.nfree {
             let jj = self.ipvt[j];
             let sing = j as isize > l;
-            let j0 = j * self.m;
-            let jj0 = jj * self.m;
-            for i in 0..=j {
-                let ji = j0 + i;
-                if sing {
-                    self.fjac[ji] = 0.;
-                }
-                let ii = self.ipvt[i];
-                if ii > jj {
-                    self.fjac[jj0 + ii] = self.fjac[ji];
-                }
-                if ii < jj {
-                    self.fjac[ii * self.m + jj] = self.fjac[ji];
-                }
+            let j0 = j * m;
+            // Zero the singular columns of R^-1
+            if sing {
+                self.fjac[j0..j0 + j + 1].fill(0.0);
             }
+            // Spread upper triangle (permuted) into lower triangle (un-permuted).
+            // ipvt is a bijection, so ipvt[i] != jj for i < j - no diagonal hit.
+            for i in 0..j {
+                let ii = self.ipvt[i];
+                let (row, col) = if ii > jj { (ii, jj) } else { (jj, ii) };
+                self.fjac[m * col + row] = self.fjac[j0 + i];
+            }
+            // Diagonal goes to wa2 (already zeroed via fill if sing)
             self.wa2[jj] = self.fjac[j0 + j];
         }
         /*
          * Symmetrize the covariance matrix in r
          */
         for j in 0..self.nfree {
-            let j0 = j * self.m;
+            let j0 = j * m;
             for i in 0..j {
-                self.fjac[j0 + i] = self.fjac[i * self.m + j];
+                self.fjac[j0 + i] = self.fjac[i * m + j];
             }
             self.fjac[j0 + j] = self.wa2[j];
         }
