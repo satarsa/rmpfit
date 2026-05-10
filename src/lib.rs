@@ -1831,7 +1831,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
              */
             for j in 0..self.nfree {
                 self.x[j] = self.wa2[j];
-                self.wa2[j] = self.diag[self.ifree[j]] * self.x[j];
+                self.wa2[j] *= self.diag[self.ifree[j]];
             }
             self.fvec[0..m].copy_from_slice(&self.wa4[0..m]);
             self.xnorm = self.wa2[0..self.nfree].enorm();
