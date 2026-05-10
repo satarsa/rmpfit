@@ -339,7 +339,7 @@ pub trait MPFitter {
     /// Returns parameter constraints for the fitted values.
     /// Override when you need fixed parameters, bounds, or custom step sizes.
     /// An empty slice (the default) means all parameters are free with no
-    /// constraints — identical to the old `None` return.
+    /// constraints.
     fn parameters(&self) -> &[MPPar] {
         &[]
     }
