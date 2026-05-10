@@ -637,7 +637,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 continue;
             }
             if debug {
-                eprintln!("FJAC PARM {}", free_p);
+                eprintln!("FJAC PARM {free_p}");
             }
             let temp = self.xnew[free_p];
             let mut h = eps * temp.abs();
@@ -2115,7 +2115,7 @@ mod tests {
                 assert_approx_eq!(status.xerror[1], 0.01893756);
             }
             Err(err) => {
-                panic!("Error in Linear fit: {}", err);
+                panic!("Error in Linear fit: {err}");
             }
         }
     }
@@ -2199,7 +2199,7 @@ mod tests {
                 assert_approx_eq!(status.xerror[2], 0.05443275);
             }
             Err(err) => {
-                panic!("Error in Quad fit: {}", err);
+                panic!("Error in Quad fit: {err}");
             }
         }
         l.params = Some([
@@ -2226,7 +2226,7 @@ mod tests {
                 assert_approx_eq!(status.xerror[2], 0.05374279);
             }
             Err(err) => {
-                panic!("Error in Quad fixed fit: {}", err);
+                panic!("Error in Quad fixed fit: {err}");
             }
         }
     }
@@ -2313,7 +2313,7 @@ mod tests {
                 assert_approx_eq!(status.xerror[3], 0.08999568);
             }
             Err(err) => {
-                panic!("Error in Quad fit: {}", err);
+                panic!("Error in Quad fit: {err}");
             }
         }
         let mut init = [0., 1., 0., 0.1];
@@ -2346,7 +2346,7 @@ mod tests {
                 assert_approx_eq!(status.xerror[3], 0.05380360);
             }
             Err(err) => {
-                panic!("Error in Quad fit: {}", err);
+                panic!("Error in Quad fit: {err}");
             }
         }
     }
@@ -2660,7 +2660,7 @@ mod tests {
                 assert_approx_eq!(status.xerror[4], 0.00041317);
             }
             Err(err) => {
-                panic!("Error in Pseudovoigt fit: {}", err);
+                panic!("Error in Pseudovoigt fit: {err}");
             }
         };
     }
@@ -2937,7 +2937,7 @@ mod tests {
                 assert_approx_eq!(status.xerror[4], 0.002053);
             }
             Err(err) => {
-                panic!("Error in Pseudovoigt fit: {}", err);
+                panic!("Error in Pseudovoigt fit: {err}");
             }
         };
     }
@@ -3026,7 +3026,7 @@ mod tests {
                 assert_approx_eq!(status.xerror[1], 0.01893756);
             }
             Err(err) => {
-                panic!("Error in lin_sided fit: {}", err);
+                panic!("Error in lin_sided fit: {err}");
             }
         }
     }
@@ -3165,7 +3165,7 @@ mod tests {
                 assert_approx_eq!(status.xerror[3], 0.08999568);
             }
             Err(err) => {
-                panic!("Error in gauss_analytical fit: {}", err);
+                panic!("Error in gauss_analytical fit: {err}");
             }
         }
     }
