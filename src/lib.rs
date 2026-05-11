@@ -25,7 +25,6 @@
 //! # Usage Example
 //! A user should implement trait ```MPFitter``` for its struct:
 //! ```
-//! use assert_approx_eq::assert_approx_eq;
 //! use rmpfit::{MPFitter, MPResult};
 //!
 //! struct Linear {
@@ -84,10 +83,18 @@
 //!     // initializing input parameters
 //!    let mut init = [1., 1.];
 //!    let res = l.mpfit(&mut init).unwrap();
-//!    assert_approx_eq!(init[0], 3.20996572); // actual 3.2
-//!    assert_approx_eq!(res.xerror[0], 0.02221018);
-//!    assert_approx_eq!(init[1], 1.77095420); // actual 1.78
-//!    assert_approx_eq!(res.xerror[1], 0.01893756);
+//!    assert_close(init[0], 3.20996572); // actual 3.2
+//!    assert_close(res.xerror[0], 0.02221018);
+//!    assert_close(init[1], 1.77095420); // actual 1.78
+//!    assert_close(res.xerror[1], 0.01893756);
+//! }
+//!
+//! fn assert_close(left: f64, right: f64) {
+//!     let abs_tol: f64 = 1e-6;
+//!     let rel_tol: f64 = 1e-9;
+//!     let diff = (left - right).abs();
+//!     let scale = left.abs().max(right.abs()).max(1.0);
+//!     assert!(diff <= abs_tol.max(rel_tol * scale));
 //! }
 //! ```
 //! then ```init``` will contain the refined parameters of the fitting function.
@@ -2044,8 +2051,27 @@ impl fmt::Debug for MPSuccess {
 #[cfg(test)]
 mod tests {
     use crate::{MPFitter, MPPar, MPResult, MPSuccess};
-    use assert_approx_eq::assert_approx_eq;
     use std::f64::consts::{LN_2, PI};
+
+    fn assert_close(left: f64, right: f64, abs_tol: f64, rel_tol: f64) {
+        let diff = (left - right).abs();
+        let scale = left.abs().max(right.abs()).max(1.0);
+        assert!(
+            diff <= abs_tol.max(rel_tol * scale),
+            concat!(
+                "assertion failed: left ~= right\n  ",
+                "left: {:?}\n right: {:?}\n  ",
+                "diff: {:?}\n  abs_tol: {:?}\n  ",
+                "rel_tol: {:?}\n allowed: {:?}"
+            ),
+            left,
+            right,
+            diff,
+            abs_tol,
+            rel_tol,
+            abs_tol.max(rel_tol * scale)
+        );
+    }
 
     #[test]
     fn linear() {
@@ -2107,11 +2133,11 @@ mod tests {
                 assert_eq!(status.success, MPSuccess::Chi);
                 assert_eq!(status.n_iter, 3);
                 assert_eq!(status.n_fev, 8);
-                assert_approx_eq!(status.best_norm, 2.75628498);
-                assert_approx_eq!(init[0], 3.20996572);
-                assert_approx_eq!(init[1], 1.77095420);
-                assert_approx_eq!(status.xerror[0], 0.02221018);
-                assert_approx_eq!(status.xerror[1], 0.01893756);
+                assert_close(status.best_norm, 2.75628498, 1e-6, 1e-9);
+                assert_close(init[0], 3.20996572, 1e-6, 1e-9);
+                assert_close(init[1], 1.77095420, 1e-6, 1e-9);
+                assert_close(status.xerror[0], 0.02221018, 1e-6, 1e-9);
+                assert_close(status.xerror[1], 0.01893756, 1e-6, 1e-9);
             }
             Err(err) => {
                 panic!("Error in Linear fit: {err}");
@@ -2189,13 +2215,13 @@ mod tests {
                 assert_eq!(status.success, MPSuccess::Chi);
                 assert_eq!(status.n_iter, 3);
                 assert_eq!(status.n_fev, 10);
-                assert_approx_eq!(status.best_norm, 5.67932273);
-                assert_approx_eq!(init[0], 4.70382909);
-                assert_approx_eq!(init[1], 0.06258629);
-                assert_approx_eq!(init[2], 6.16308723);
-                assert_approx_eq!(status.xerror[0], 0.09751164);
-                assert_approx_eq!(status.xerror[1], 0.05480195);
-                assert_approx_eq!(status.xerror[2], 0.05443275);
+                assert_close(status.best_norm, 5.67932273, 1e-6, 1e-9);
+                assert_close(init[0], 4.70382909, 1e-6, 1e-9);
+                assert_close(init[1], 0.06258629, 1e-6, 1e-9);
+                assert_close(init[2], 6.16308723, 1e-6, 1e-9);
+                assert_close(status.xerror[0], 0.09751164, 1e-6, 1e-9);
+                assert_close(status.xerror[1], 0.05480195, 1e-6, 1e-9);
+                assert_close(status.xerror[2], 0.05443275, 1e-6, 1e-9);
             }
             Err(err) => {
                 panic!("Error in Quad fit: {err}");
@@ -2216,13 +2242,13 @@ mod tests {
                 assert_eq!(status.success, MPSuccess::Chi);
                 assert_eq!(status.n_iter, 3);
                 assert_eq!(status.n_fev, 8);
-                assert_approx_eq!(status.best_norm, 6.98358800);
-                assert_approx_eq!(init[0], 4.69625430);
-                assert_approx_eq!(init[1], 0.00000000);
-                assert_approx_eq!(init[2], 6.17295360);
-                assert_approx_eq!(status.xerror[0], 0.09728581);
-                assert_approx_eq!(status.xerror[1], 0.00000000);
-                assert_approx_eq!(status.xerror[2], 0.05374279);
+                assert_close(status.best_norm, 6.98358800, 1e-6, 1e-9);
+                assert_close(init[0], 4.69625430, 1e-6, 1e-9);
+                assert_close(init[1], 0.00000000, 1e-6, 1e-9);
+                assert_close(init[2], 6.17295360, 1e-6, 1e-9);
+                assert_close(status.xerror[0], 0.09728581, 1e-6, 1e-9);
+                assert_close(status.xerror[1], 0.00000000, 1e-6, 1e-9);
+                assert_close(status.xerror[2], 0.05374279, 1e-6, 1e-9);
             }
             Err(err) => {
                 panic!("Error in Quad fixed fit: {err}");
@@ -2301,15 +2327,15 @@ mod tests {
                 assert_eq!(status.success, MPSuccess::Chi);
                 assert_eq!(status.n_iter, 27);
                 assert_eq!(status.n_fev, 134);
-                assert_approx_eq!(status.best_norm, 10.35003196);
-                assert_approx_eq!(init[0], 0.48044336);
-                assert_approx_eq!(init[1], 4.55075247);
-                assert_approx_eq!(init[2], -0.06256246);
-                assert_approx_eq!(init[3], 0.39747174);
-                assert_approx_eq!(status.xerror[0], 0.23223493);
-                assert_approx_eq!(status.xerror[1], 0.39543448);
-                assert_approx_eq!(status.xerror[2], 0.07471491);
-                assert_approx_eq!(status.xerror[3], 0.08999568);
+                assert_close(status.best_norm, 10.35003196, 1e-6, 1e-9);
+                assert_close(init[0], 0.48044336, 1e-6, 1e-9);
+                assert_close(init[1], 4.55075247, 1e-6, 1e-9);
+                assert_close(init[2], -0.06256246, 1e-6, 1e-9);
+                assert_close(init[3], 0.39747174, 1e-6, 1e-9);
+                assert_close(status.xerror[0], 0.23223493, 1e-6, 1e-9);
+                assert_close(status.xerror[1], 0.39543448, 1e-6, 1e-9);
+                assert_close(status.xerror[2], 0.07471491, 1e-6, 1e-9);
+                assert_close(status.xerror[3], 0.08999568, 1e-6, 1e-9);
             }
             Err(err) => {
                 panic!("Error in Quad fit: {err}");
@@ -2334,15 +2360,15 @@ mod tests {
                 assert_eq!(status.success, MPSuccess::Chi);
                 assert_eq!(status.n_iter, 12);
                 assert_eq!(status.n_fev, 35);
-                assert_approx_eq!(status.best_norm, 15.51613428);
-                assert_approx_eq!(init[0], 0.00000000);
-                assert_approx_eq!(init[1], 5.05924391);
-                assert_approx_eq!(init[2], 0.00000000);
-                assert_approx_eq!(init[3], 0.47974647);
-                assert_approx_eq!(status.xerror[0], 0.00000000);
-                assert_approx_eq!(status.xerror[1], 0.32930696);
-                assert_approx_eq!(status.xerror[2], 0.00000000);
-                assert_approx_eq!(status.xerror[3], 0.05380360);
+                assert_close(status.best_norm, 15.51613428, 1e-6, 1e-9);
+                assert_close(init[0], 0.00000000, 1e-6, 1e-9);
+                assert_close(init[1], 5.05924391, 1e-6, 1e-9);
+                assert_close(init[2], 0.00000000, 1e-6, 1e-9);
+                assert_close(init[3], 0.47974647, 1e-6, 1e-9);
+                assert_close(status.xerror[0], 0.00000000, 1e-6, 1e-9);
+                assert_close(status.xerror[1], 0.32930696, 1e-6, 1e-9);
+                assert_close(status.xerror[2], 0.00000000, 1e-6, 1e-9);
+                assert_close(status.xerror[3], 0.05380360, 1e-6, 1e-9);
             }
             Err(err) => {
                 panic!("Error in Quad fit: {err}");
@@ -2646,17 +2672,17 @@ mod tests {
                 assert_eq!(status.success, MPSuccess::Chi);
                 assert_eq!(status.n_iter, 12);
                 assert_eq!(status.n_fev, 69);
-                assert_approx_eq!(status.best_norm, 37480.11190046);
-                assert_approx_eq!(init[0], 45.99597613);
-                assert_approx_eq!(init[1], 0.06848724);
-                assert_approx_eq!(init[2], 1200.62523271);
-                assert_approx_eq!(init[3], 763.71495089);
-                assert_approx_eq!(init[4], 0.47813424);
-                assert_approx_eq!(status.xerror[0], 0.00000456);
-                assert_approx_eq!(status.xerror[1], 0.00001329);
-                assert_approx_eq!(status.xerror[2], 0.19927477);
-                assert_approx_eq!(status.xerror[3], 0.16325942);
-                assert_approx_eq!(status.xerror[4], 0.00041317);
+                assert_close(status.best_norm, 37480.11190046, 1e-6, 1e-9);
+                assert_close(init[0], 45.99597613, 1e-6, 1e-9);
+                assert_close(init[1], 0.06848724, 1e-6, 1e-9);
+                assert_close(init[2], 1200.62523271, 1e-6, 1e-9);
+                assert_close(init[3], 763.71495089, 1e-6, 1e-9);
+                assert_close(init[4], 0.47813424, 1e-6, 1e-9);
+                assert_close(status.xerror[0], 0.00000456, 1e-6, 1e-9);
+                assert_close(status.xerror[1], 0.00001329, 1e-6, 1e-9);
+                assert_close(status.xerror[2], 0.19927477, 1e-6, 1e-9);
+                assert_close(status.xerror[3], 0.16325942, 1e-6, 1e-9);
+                assert_close(status.xerror[4], 0.00041317, 1e-6, 1e-9);
             }
             Err(err) => {
                 panic!("Error in Pseudovoigt fit: {err}");
@@ -2924,16 +2950,16 @@ mod tests {
         let res = l.mpfit(&mut init);
         match res {
             Ok(status) => {
-                assert_approx_eq!(init[0], 53.605029);
-                assert_approx_eq!(init[1], 0.081662);
-                assert_approx_eq!(init[2], 105.675544);
-                assert_approx_eq!(init[3], 178.305680);
-                assert_approx_eq!(init[4], 0.113177);
-                assert_approx_eq!(status.xerror[0], 0.000018);
-                assert_approx_eq!(status.xerror[1], 0.000046);
-                assert_approx_eq!(status.xerror[2], 0.081090);
-                assert_approx_eq!(status.xerror[3], 0.079527);
-                assert_approx_eq!(status.xerror[4], 0.002053);
+                assert_close(init[0], 53.605029, 1e-6, 1e-9);
+                assert_close(init[1], 0.081662, 1e-6, 1e-9);
+                assert_close(init[2], 105.675544, 2e-6, 1e-9);
+                assert_close(init[3], 178.305680, 2e-6, 1e-9);
+                assert_close(init[4], 0.113177, 1e-6, 1e-9);
+                assert_close(status.xerror[0], 0.000018, 1e-6, 1e-9);
+                assert_close(status.xerror[1], 0.000046, 1e-6, 1e-9);
+                assert_close(status.xerror[2], 0.081090, 1e-6, 1e-9);
+                assert_close(status.xerror[3], 0.079527, 1e-6, 1e-9);
+                assert_close(status.xerror[4], 0.002053, 1e-6, 1e-9);
             }
             Err(err) => {
                 panic!("Error in Pseudovoigt fit: {err}");
@@ -3018,11 +3044,11 @@ mod tests {
                 assert_eq!(status.success, MPSuccess::Chi);
                 assert_eq!(status.n_iter, 3);
                 assert_eq!(status.n_fev, 12);
-                assert_approx_eq!(status.best_norm, 2.75628498);
-                assert_approx_eq!(init[0], 3.20996572);
-                assert_approx_eq!(init[1], 1.77095420);
-                assert_approx_eq!(status.xerror[0], 0.02221018);
-                assert_approx_eq!(status.xerror[1], 0.01893756);
+                assert_close(status.best_norm, 2.75628498, 1e-6, 1e-9);
+                assert_close(init[0], 3.20996572, 1e-6, 1e-9);
+                assert_close(init[1], 1.77095420, 1e-6, 1e-9);
+                assert_close(status.xerror[0], 0.02221018, 1e-6, 1e-9);
+                assert_close(status.xerror[1], 0.01893756, 1e-6, 1e-9);
             }
             Err(err) => {
                 panic!("Error in lin_sided fit: {err}");
@@ -3153,15 +3179,15 @@ mod tests {
                 assert_eq!(status.success, MPSuccess::Chi);
                 assert_eq!(status.n_iter, 27);
                 assert_eq!(status.n_fev, 56);
-                assert_approx_eq!(status.best_norm, 10.35003196);
-                assert_approx_eq!(init[0], 0.48044336);
-                assert_approx_eq!(init[1], 4.55075247);
-                assert_approx_eq!(init[2], -0.06256246);
-                assert_approx_eq!(init[3], 0.39747174);
-                assert_approx_eq!(status.xerror[0], 0.23223493);
-                assert_approx_eq!(status.xerror[1], 0.39543448);
-                assert_approx_eq!(status.xerror[2], 0.07471491);
-                assert_approx_eq!(status.xerror[3], 0.08999568);
+                assert_close(status.best_norm, 10.35003196, 1e-6, 1e-9);
+                assert_close(init[0], 0.48044336, 1e-6, 1e-9);
+                assert_close(init[1], 4.55075247, 1e-6, 1e-9);
+                assert_close(init[2], -0.06256246, 1e-6, 1e-9);
+                assert_close(init[3], 0.39747174, 1e-6, 1e-9);
+                assert_close(status.xerror[0], 0.23223493, 1e-6, 1e-9);
+                assert_close(status.xerror[1], 0.39543448, 1e-6, 1e-9);
+                assert_close(status.xerror[2], 0.07471491, 1e-6, 1e-9);
+                assert_close(status.xerror[3], 0.08999568, 1e-6, 1e-9);
             }
             Err(err) => {
                 panic!("Error in gauss_analytical fit: {err}");

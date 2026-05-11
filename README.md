@@ -11,17 +11,14 @@ and Gaussian (free and fixed parameters) function) are reproduced and passed.
 Just a few obvious Rust-specific optimizations are done:
 
 * Removing ```goto``` (fuf).
-* Standard Rust Result as result.
-* A few loops are zipped to help the compiler optimize the code
-  (no performance tests are done anyway).
+* Using `MPResult` for error handling.
+* A few loops are zipped to help the compiler optimize the code (no performance tests are done anyway).
 * Using trait ```MPFitter``` to call the user code.
-* Using ```bool``` type if possible.
 
 ## Advantages
 
 * Pure Rust.
-* No external dependencies
-  ([assert_approx_eq](https://docs.rs/assert_approx_eq/) just for testing).
+* No external dependencies.
 * Internal Jacobian calculations.
 * Sided, analytical or user provided derivatives are also implemented.
 * Derivative debug mode (comparing analytical vs numerical) prints to stderr (as in cmpfit).
@@ -90,10 +87,18 @@ fn main() {
     // initializing input parameters
     let mut init = [1., 1.];
     let res = l.mpfit(&mut init).unwrap();
-    assert_approx_eq!(init[0], 3.20996572); // actual 3.2
-    assert_approx_eq!(status.xerror[0], 0.02221018);
-    assert_approx_eq!(init[1], 1.77095420); // actual 1.78
-    assert_approx_eq!(status.xerror[1], 0.01893756);
+    assert_close(init[0], 3.20996572); // actual 3.2
+    assert_close(res.xerror[0], 0.02221018);
+    assert_close(init[1], 1.77095420); // actual 1.78
+    assert_close(res.xerror[1], 0.01893756);
+}
+
+fn assert_close(left: f64, right: f64) {
+    let abs_tol: f64 = 1e-6;
+    let rel_tol: f64 = 1e-9;
+    let diff = (left - right).abs();
+    let scale = left.abs().max(right.abs()).max(1.0);
+    assert!(diff <= abs_tol.max(rel_tol * scale));
 }
 ```
 
