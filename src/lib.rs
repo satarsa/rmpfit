@@ -196,6 +196,23 @@ impl Default for MPPar {
     }
 }
 
+/// Bound on the number of user-function evaluations.
+///
+/// A non-finite jacobian can keep every trial step from being accepted, so the
+/// iteration counter never advances and `max_iter` cannot stop the fit; this
+/// bound is what does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MPMaxFev {
+    /// MINPACK default of `200 * (nfree + 1)` evaluations.
+    #[default]
+    Default,
+    /// No cap on the number of evaluations.
+    NoLimit,
+    /// Cap at this many evaluations. `Limited(0)` falls back to
+    /// [`MPMaxFev::Default`].
+    Limited(usize),
+}
+
 /// MPFIT configuration structure
 #[derive(Clone)]
 pub struct MPConfig {
@@ -216,9 +233,9 @@ pub struct MPConfig {
     /// errors/covariances are estimated based on input
     /// parameter values, but no fitting iterations are done.
     pub max_iter: usize,
-    /// Maximum number of function evaluations, or 0 for no limit
-    /// (Default: 0 (no limit))
-    pub max_fev: usize,
+    /// Maximum number of function evaluations. See [`MPMaxFev`].
+    /// (Default: [`MPMaxFev::Default`] => 200*(nfree+1))
+    pub max_fev: MPMaxFev,
     /// Scale variables by user values?
     /// true = yes, user scale values in diag;
     /// false = no, variables scaled internally (Default: false)
@@ -239,7 +256,7 @@ impl MPConfig {
             step_factor: 100.0,
             covtol: 1e-14,
             max_iter: 200,
-            max_fev: 0,
+            max_fev: MPMaxFev::Default,
             do_user_scale: false,
             no_finite_check: false,
         }
@@ -473,6 +490,7 @@ struct MPFit<'a, T: MPFitter> {
     orig_norm: f64,
     par: f64,
     iter: usize,
+    maxfev: usize,
     cfg: &'a MPConfig,
 }
 
@@ -521,6 +539,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                 orig_norm: 0.0,
                 par: 0.0,
                 iter: 1,
+                maxfev: 0,
                 cfg,
             })
         }
@@ -935,6 +954,14 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         if self.m < self.nfree {
             return Err(MPError::DoF);
         }
+        /* Effective evaluation cap (0 disables it). The MINPACK default bounds
+        the loop even when a non-finite jacobian keeps every step from being
+        accepted (iter never advances, so maxiter cannot fire). */
+        self.maxfev = match self.cfg.max_fev {
+            MPMaxFev::NoLimit => 0,
+            MPMaxFev::Limited(n) if n > 0 => n,
+            _ => 200 * (self.nfree + 1),
+        };
         Ok(())
     }
 
@@ -1062,7 +1089,10 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
                     for (ij, i) in (jj..).zip(0..=j) {
                         sum += self.fjac[ij] * (self.qtf[i] / self.fnorm);
                     }
-                    gnorm = gnorm.max((sum / self.wa2[l]).abs());
+                    let candidate = (sum / self.wa2[l]).abs();
+                    /* C mp_dmax1 semantics: keep NaN, unlike f64::max which drops it
+                    and would fake gtol convergence on a non-finite jacobian. */
+                    gnorm = if gnorm >= candidate { gnorm } else { candidate };
                 }
                 jj += self.m;
             }
@@ -1866,7 +1896,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         /*
          *	    tests for termination and stringent tolerances.
          */
-        if self.cfg.max_fev > 0 && self.nfev >= self.cfg.max_fev {
+        if self.maxfev > 0 && self.nfev >= self.maxfev {
             /* Too many function evaluations */
             self.info = MPSuccess::MaxIter;
         }
@@ -2050,7 +2080,7 @@ impl fmt::Debug for MPSuccess {
 
 #[cfg(test)]
 mod tests {
-    use crate::{MPFitter, MPPar, MPResult, MPSuccess};
+    use crate::{MPConfig, MPError, MPFitter, MPMaxFev, MPPar, MPResult, MPStatus, MPSuccess};
     use std::f64::consts::{LN_2, PI};
 
     fn assert_close(left: f64, right: f64, abs_tol: f64, rel_tol: f64) {
@@ -3193,5 +3223,149 @@ mod tests {
                 panic!("Error in gauss_analytical fit: {err}");
             }
         }
+    }
+
+    // Regression test for the mpfit hang/false-convergence on a non-finite
+    // jacobian. Rust mirror of cmpfit's mpfit_nan_hang_test.c.
+    //
+    // With MPSide::User mpfit asks the user function for analytical derivatives.
+    // If any derivative is NaN, every later comparison against it is false: no
+    // convergence test fires, ratio is NaN so the inner-loop back-edge is not
+    // taken and control falls to the outer loop, iter never advances (it only
+    // moves on an accepted step), so max_iter cannot bound the call. The one
+    // guard that would -- nfev >= maxfev -- was off because max_fev defaulted to
+    // no limit. In cmpfit that is a hang; in rmpfit f64::max swallowed the NaN in
+    // gnorm(), so the fit silently returned a bogus Dir "convergence" instead.
+    // A 5 s timeout on a worker thread turns a hang into a failure, like the C
+    // test's SIGALRM.
+    struct NanJacobian {
+        cfg: MPConfig,
+        pars: [MPPar; 1],
+    }
+
+    impl MPFitter for NanJacobian {
+        fn eval(&mut self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
+            for d in deviates.iter_mut() {
+                *d = 1.0 - params[0];
+            }
+            Ok(())
+        }
+
+        fn number_of_points(&self) -> usize {
+            10
+        }
+
+        fn config(&self) -> &MPConfig {
+            &self.cfg
+        }
+
+        fn parameters(&self) -> &[MPPar] {
+            &self.pars
+        }
+
+        fn jacobian(
+            &mut self,
+            params: &[f64],
+            deviates: &mut [f64],
+            derivs: &mut [Option<Vec<f64>>],
+        ) -> MPResult<()> {
+            for (i, d) in deviates.iter_mut().enumerate() {
+                *d = 1.0 - params[0];
+                if let Some(col) = &mut derivs[0] {
+                    col[i] = f64::NAN;
+                }
+            }
+            Ok(())
+        }
+    }
+
+    enum Outcome {
+        Returned(MPResult<MPStatus>),
+        Hung,
+    }
+
+    fn run_nan_fit(cfg: MPConfig) -> Outcome {
+        use crate::MPSide;
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut f = NanJacobian {
+                cfg,
+                pars: [MPPar {
+                    side: MPSide::User,
+                    ..MPPar::new()
+                }],
+            };
+            let mut init = [0.0f64];
+            let res = f.mpfit(&mut init);
+            let _ = tx.send(res);
+        });
+        match rx.recv_timeout(Duration::from_secs(5)) {
+            Ok(res) => Outcome::Returned(res),
+            Err(_) => Outcome::Hung,
+        }
+    }
+
+    fn assert_maxiter(label: &str, cfg: MPConfig) {
+        match run_nan_fit(cfg) {
+            Outcome::Hung => panic!("{label}: HUNG (caught by 5s timeout)"),
+            Outcome::Returned(Ok(st)) => assert_eq!(
+                st.success,
+                MPSuccess::MaxIter,
+                "{label}: expected MaxIter, got a different success status (n_fev={}, n_iter={})",
+                st.n_fev,
+                st.n_iter
+            ),
+            Outcome::Returned(Err(_)) => panic!("{label}: expected Ok(MaxIter), got an error"),
+        }
+    }
+
+    #[test]
+    fn nan_default_finite_check_reports_nan() {
+        match run_nan_fit(MPConfig::new()) {
+            Outcome::Hung => panic!("default: HUNG (caught by 5s timeout)"),
+            Outcome::Returned(Err(MPError::Nan)) => {}
+            Outcome::Returned(Err(_)) => {
+                panic!("default: expected Err(Nan), got a different error")
+            }
+            Outcome::Returned(Ok(_)) => panic!("default: expected Err(Nan), got Ok"),
+        }
+    }
+
+    #[test]
+    fn nan_maxfev_bounds_the_loop() {
+        assert_maxiter(
+            "maxfev",
+            MPConfig {
+                no_finite_check: true,
+                max_fev: MPMaxFev::Limited(2000),
+                ..MPConfig::new()
+            },
+        );
+    }
+
+    #[test]
+    fn nan_minpack_default_bounds_the_loop() {
+        assert_maxiter(
+            "minpack",
+            MPConfig {
+                no_finite_check: true,
+                max_fev: MPMaxFev::Default,
+                ..MPConfig::new()
+            },
+        );
+    }
+
+    #[test]
+    fn nan_limited_zero_falls_back_to_default() {
+        assert_maxiter(
+            "limited0",
+            MPConfig {
+                no_finite_check: true,
+                max_fev: MPMaxFev::Limited(0),
+                ..MPConfig::new()
+            },
+        );
     }
 }
