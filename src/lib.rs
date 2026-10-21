@@ -1477,7 +1477,7 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
          *     set par to the closer endpoint.
          */
         self.par = self.par.max(parl);
-        self.par = self.par.max(paru);
+        self.par = self.par.min(paru);
         if self.par == 0. {
             self.par = gnorm / dxnorm;
         }
@@ -2355,8 +2355,8 @@ mod tests {
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
-                assert_eq!(status.n_iter, 27);
-                assert_eq!(status.n_fev, 134);
+                assert_eq!(status.n_iter, 28);
+                assert_eq!(status.n_fev, 139);
                 assert_close(status.best_norm, 10.35003196, 1e-6, 1e-9);
                 assert_close(init[0], 0.48044336, 1e-6, 1e-9);
                 assert_close(init[1], 4.55075247, 1e-6, 1e-9);
@@ -3207,8 +3207,8 @@ mod tests {
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
-                assert_eq!(status.n_iter, 27);
-                assert_eq!(status.n_fev, 56);
+                assert_eq!(status.n_iter, 28);
+                assert_eq!(status.n_fev, 58);
                 assert_close(status.best_norm, 10.35003196, 1e-6, 1e-9);
                 assert_close(init[0], 0.48044336, 1e-6, 1e-9);
                 assert_close(init[1], 4.55075247, 1e-6, 1e-9);
