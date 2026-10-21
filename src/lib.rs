@@ -987,8 +987,8 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
         }
         let m = self.m;
         for j in 0..self.nfree {
-            let lpegged = j < self.qllim.len() && self.x[j] == self.llim[j];
-            let upegged = j < self.qulim.len() && self.x[j] == self.ulim[j];
+            let lpegged = self.qllim[j] && self.x[j] == self.llim[j];
+            let upegged = self.qulim[j] && self.x[j] == self.ulim[j];
             let mut sum = 0.;
             // If the parameter is pegged at a limit, compute the gradient direction
             let ij = j * m;
@@ -3367,5 +3367,49 @@ mod tests {
                 ..MPConfig::new()
             },
         );
+    }
+
+    #[test]
+    fn free_param_at_unused_limit() {
+        struct Bounded {
+            pars: [MPPar; 2],
+        }
+
+        impl MPFitter for Bounded {
+            fn eval(&mut self, params: &[f64], deviates: &mut [f64]) -> MPResult<()> {
+                deviates[0] = params[0] + 3.0;
+                deviates[1] = params[1] - 5.0;
+                Ok(())
+            }
+
+            fn number_of_points(&self) -> usize {
+                2
+            }
+
+            fn parameters(&self) -> &[MPPar] {
+                &self.pars
+            }
+        }
+        let mut l = Bounded {
+            pars: [
+                MPPar {
+                    limited_low: true,
+                    limit_low: 0.0,
+                    ..MPPar::new()
+                },
+                MPPar::new(),
+            ],
+        };
+        let mut init = [10., 0.];
+        let res = l.mpfit(&mut init);
+        match res {
+            Ok(_) => {
+                assert_close(init[0], 0.0, 1e-6, 1e-9);
+                assert_close(init[1], 5.0, 1e-6, 1e-9);
+            }
+            Err(err) => {
+                panic!("Error in Bounded fit: {err}");
+            }
+        }
     }
 }
