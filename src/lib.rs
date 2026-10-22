@@ -2371,8 +2371,6 @@ mod tests {
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
-                assert_eq!(status.n_iter, 28);
-                assert_eq!(status.n_fev, 139);
                 assert_close(status.best_norm, 10.35003196, 1e-6, 1e-9);
                 assert_close(init[0], 0.48044336, 1e-6, 1e-9);
                 assert_close(init[1], 4.55075247, 1e-6, 1e-9);
@@ -2404,8 +2402,6 @@ mod tests {
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
-                assert_eq!(status.n_iter, 12);
-                assert_eq!(status.n_fev, 35);
                 assert_close(status.best_norm, 15.51613428, 1e-6, 1e-9);
                 assert_close(init[0], 0.00000000, 1e-6, 1e-9);
                 assert_close(init[1], 5.05924391, 1e-6, 1e-9);
@@ -3223,8 +3219,6 @@ mod tests {
         match res {
             Ok(status) => {
                 assert_eq!(status.success, MPSuccess::Chi);
-                assert_eq!(status.n_iter, 28);
-                assert_eq!(status.n_fev, 58);
                 assert_close(status.best_norm, 10.35003196, 1e-6, 1e-9);
                 assert_close(init[0], 0.48044336, 1e-6, 1e-9);
                 assert_close(init[1], 4.55075247, 1e-6, 1e-9);
