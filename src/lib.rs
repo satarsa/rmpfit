@@ -241,8 +241,8 @@ pub struct MPConfig {
     /// false = no, variables scaled internally (Default: false)
     pub do_user_scale: bool,
     /// Disable check for infinite quantities from user?
-    /// true = perform check;
-    /// false = do not perform check (Default: false)
+    /// true = do not perform check;
+    /// false = perform check (Default: false)
     pub no_finite_check: bool,
 }
 
