@@ -1068,9 +1068,12 @@ impl<'a, F: MPFitter> MPFit<'a, F> {
     /// has been reduced to a (small) square matrix, and the test is O(N^2).
     fn check_is_finite(&self) -> bool {
         if !self.cfg.no_finite_check {
-            for val in &self.fjac {
-                if !val.is_finite() {
-                    return false;
+            for j in 0..self.nfree {
+                let off = j * self.m;
+                for val in &self.fjac[off..off + self.nfree] {
+                    if !val.is_finite() {
+                        return false;
+                    }
                 }
             }
         }
